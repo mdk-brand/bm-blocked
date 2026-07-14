@@ -1,0 +1,1638 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>bm-blocked</title>
+    <meta name="theme-color" content="#f5f5f7" />
+    <script>
+      try {
+        const savedTheme = localStorage.getItem("bm-blocked-theme");
+        const preferredTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+        document.documentElement.dataset.theme = savedTheme || preferredTheme;
+      } catch (error) {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+
+        --page: #f5f5f7;
+        --surface: #ffffff;
+        --surface-subtle: #f8f8fa;
+        --surface-pressed: #ededf0;
+        --text: #1d1d1f;
+        --text-secondary: #6e6e73;
+        --text-tertiary: #86868b;
+        --line: #d7d7dc;
+        --line-soft: #e8e8ed;
+        --accent: #0066cc;
+        --accent-hover: #0055b3;
+        --accent-soft: #eaf3fc;
+        --success: #16794b;
+        --success-soft: #edf8f2;
+        --danger: #c9342f;
+        --danger-hover: #a92824;
+        --danger-soft: #fff1f0;
+        --focus: rgba(0, 102, 204, 0.24);
+        --danger-line: #f1c0bd;
+        --success-line: #b9dfcc;
+        --disabled: #b8b8bd;
+        --disabled-text: rgba(255, 255, 255, 0.92);
+        --choice-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        --header-background: rgba(245, 245, 247, 0.86);
+        --header-line: rgba(0, 0, 0, 0.08);
+        --popover: rgba(255, 255, 255, 0.98);
+        --neutral-hover-line: #bcbcc2;
+        --success-hover-line: #a8d8bf;
+        --shadow-float: 0 18px 50px rgba(0, 0, 0, 0.09);
+        --radius-sm: 6px;
+        --radius-md: 8px;
+        --control-height: 44px;
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 12px;
+        --space-4: 16px;
+        --space-5: 20px;
+        --space-6: 24px;
+        --space-7: 28px;
+        --space-8: 32px;
+        --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+
+        color: var(--text);
+        background: var(--page);
+      }
+
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --page: #111315;
+        --surface: #191b1f;
+        --surface-subtle: #212429;
+        --surface-pressed: #2a2e34;
+        --text: #f4f4f6;
+        --text-secondary: #b7b7bd;
+        --text-tertiary: #909198;
+        --line: #3b3f46;
+        --line-soft: #2b2f35;
+        --accent: #4d9fff;
+        --accent-hover: #74b5ff;
+        --accent-soft: #172b42;
+        --success: #61cb93;
+        --success-soft: #172b22;
+        --danger: #ff716b;
+        --danger-hover: #ff918c;
+        --danger-soft: #351c1e;
+        --focus: rgba(77, 159, 255, 0.3);
+        --header-background: rgba(17, 19, 21, 0.88);
+        --header-line: rgba(255, 255, 255, 0.09);
+        --popover: rgba(25, 27, 31, 0.98);
+        --disabled: #3c4047;
+        --disabled-text: #97999f;
+        --choice-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+        --danger-line: #633236;
+        --success-line: #28563e;
+        --neutral-hover-line: #565b64;
+        --success-hover-line: #347454;
+        --shadow-float: 0 18px 50px rgba(0, 0, 0, 0.35);
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html {
+        min-width: 320px;
+        background: var(--page);
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--page);
+        color: var(--text);
+        font-size: 15px;
+        line-height: 1.45;
+        letter-spacing: 0;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .auth-gate {
+        display: grid;
+        min-height: 100vh;
+        place-items: center;
+        padding: var(--space-6);
+      }
+
+      .auth-panel {
+        width: min(100%, 420px);
+        padding: var(--space-8);
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        box-shadow: var(--shadow-float);
+      }
+
+      .auth-brand-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+        margin-bottom: var(--space-7);
+      }
+
+      .auth-brand {
+        font-size: 22px;
+        font-weight: 700;
+      }
+
+      .auth-panel h1 {
+        margin: 0 0 var(--space-2);
+        font-size: 28px;
+        line-height: 1.2;
+      }
+
+      .auth-panel > p {
+        margin: 0 0 var(--space-6);
+        color: var(--text-secondary);
+      }
+
+      .auth-fields {
+        display: grid;
+        gap: var(--space-5);
+      }
+
+      .auth-fields button {
+        width: 100%;
+      }
+
+      .auth-status {
+        min-height: 22px;
+        margin: var(--space-4) 0 0;
+        color: var(--danger);
+        font-size: 14px;
+      }
+
+      .app-header {
+        position: sticky;
+        z-index: 30;
+        top: 0;
+        min-height: 72px;
+        border-bottom: 1px solid var(--header-line);
+        background: var(--header-background);
+        backdrop-filter: blur(20px) saturate(180%);
+      }
+
+      .app-header-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: min(100%, 1200px);
+        min-height: 72px;
+        margin: 0 auto;
+        padding: 0 var(--space-8);
+      }
+
+      .app-header h1 {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 650;
+        line-height: 1.15;
+      }
+
+      .header-session {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+      }
+
+      .theme-toggle {
+        display: inline-grid;
+        place-items: center;
+        width: 36px;
+        min-width: 36px;
+        height: 36px;
+        min-height: 36px;
+        padding: 0;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        background: var(--surface);
+        color: var(--text-secondary);
+      }
+
+      .theme-toggle svg {
+        width: 17px;
+        height: 17px;
+        pointer-events: none;
+      }
+
+      .theme-icon-sun {
+        display: none;
+      }
+
+      :root[data-theme="dark"] .theme-icon-moon {
+        display: none;
+      }
+
+      :root[data-theme="dark"] .theme-icon-sun {
+        display: block;
+      }
+
+      .session-user {
+        color: var(--text-secondary);
+        font-size: 14px;
+        white-space: nowrap;
+      }
+
+      .header-logout {
+        min-height: 36px;
+        padding: 0 var(--space-4);
+      }
+
+      main {
+        width: min(100%, 1200px);
+        margin: 0 auto;
+        padding: var(--space-7) var(--space-8) 56px;
+      }
+
+      h1 {
+        margin: 0 0 var(--space-6);
+        font-size: 24px;
+        line-height: 1.15;
+        font-weight: 650;
+        letter-spacing: 0;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr) 184px;
+        align-items: end;
+        gap: var(--space-4);
+        margin-bottom: var(--space-4);
+        padding: var(--space-7);
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+        margin: 0 0 var(--space-5);
+      }
+
+      #postTableActions {
+        margin-top: var(--space-3);
+      }
+
+      .field {
+        position: relative;
+        min-width: 0;
+      }
+
+      label {
+        display: block;
+        margin-bottom: var(--space-2);
+        color: var(--text);
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1.3;
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+        letter-spacing: 0;
+      }
+
+      button {
+        width: auto;
+        min-height: var(--control-height);
+        padding: 0 16px;
+        border: 1px solid var(--accent);
+        border-radius: var(--radius-md);
+        background: var(--accent);
+        color: #ffffff;
+        font-weight: 600;
+        cursor: pointer;
+        touch-action: manipulation;
+        transition:
+          transform 120ms var(--ease-out),
+          border-color 160ms ease,
+          background-color 160ms ease,
+          color 160ms ease,
+          box-shadow 160ms ease;
+      }
+
+      button:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 4px var(--focus);
+      }
+
+      button:active:not(:disabled) {
+        transform: scale(0.975);
+      }
+
+      button:disabled {
+        border-color: var(--disabled);
+        background: var(--disabled);
+        color: var(--disabled-text);
+        cursor: not-allowed;
+      }
+
+      input,
+      select {
+        width: 100%;
+        min-height: var(--control-height);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background-color: var(--surface);
+        color: var(--text);
+        transition:
+          border-color 160ms ease,
+          box-shadow 160ms ease,
+          background-color 160ms ease;
+      }
+
+      input {
+        padding: 0 14px;
+      }
+
+      select {
+        padding: 0 38px 0 14px;
+      }
+
+      input::placeholder {
+        color: var(--text-tertiary);
+        opacity: 1;
+      }
+
+      input:disabled,
+      select:disabled {
+        border-color: var(--line-soft);
+        background: var(--surface-subtle);
+        color: var(--text-tertiary);
+        cursor: not-allowed;
+      }
+
+      input:focus-visible,
+      select:focus-visible {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 4px var(--focus);
+      }
+
+      .secondary-button {
+        border-color: transparent;
+        background: transparent;
+        color: var(--danger);
+      }
+
+      #clearReport {
+        border-color: #db3939;
+        background: #db3939;
+        color: #ffffff;
+      }
+
+      .secondary-button:disabled,
+      #clearReport:disabled {
+        border-color: var(--disabled);
+        background: var(--disabled);
+        color: var(--disabled-text);
+      }
+
+      .status {
+        min-height: 0;
+        margin: 0 0 var(--space-5);
+        color: var(--text-secondary);
+        font-size: 13px;
+        line-height: 1.4;
+        overflow-wrap: anywhere;
+      }
+
+      .status:not(:empty) {
+        padding: 10px 12px;
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius-md);
+        background: var(--surface-subtle);
+      }
+
+      .status.error {
+        border-color: var(--danger-line);
+        background: var(--danger-soft);
+        color: var(--danger-hover);
+      }
+
+      .status.success {
+        border-color: var(--success-line);
+        background: var(--success-soft);
+        color: var(--success);
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(150px, 1fr));
+        gap: var(--space-2);
+        margin-bottom: var(--space-3);
+      }
+
+      .metric {
+        min-width: 0;
+        min-height: 58px;
+        padding: 10px 12px;
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius-sm);
+        background: var(--surface-subtle);
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 20px;
+        line-height: 1.15;
+        font-weight: 650;
+      }
+
+      .metric span {
+        display: block;
+        margin-top: var(--space-1);
+        overflow: hidden;
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.25;
+        text-overflow: ellipsis;
+      }
+
+      .table-wrap {
+        width: 100%;
+        overflow-x: auto;
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+      }
+
+      table {
+        width: 100%;
+        min-width: 760px;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        padding: 13px 14px;
+        border-bottom: 1px solid var(--line-soft);
+        text-align: center;
+        vertical-align: middle;
+      }
+
+      th {
+        color: var(--text-secondary);
+        background: var(--surface-subtle);
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      td {
+        color: var(--text);
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      td:not(:first-child),
+      th:not(:first-child) {
+        width: 190px;
+      }
+
+      th:nth-child(2),
+      td:nth-child(2) {
+        width: auto;
+      }
+
+      th.select-column,
+      td.select-column {
+        width: 48px;
+        text-align: center;
+      }
+
+      input[type="checkbox"] {
+        width: 18px;
+        min-height: 18px;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+
+      .help-button {
+        display: inline;
+        width: auto;
+        min-width: 0;
+        height: auto;
+        min-height: 0;
+        margin-left: 5px;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: #5f6368;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .unavailable-list-cell {
+        text-align: left;
+        background: var(--surface-subtle);
+      }
+
+      .unavailable-list {
+        display: grid;
+        gap: var(--space-2);
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .unavailable-list a {
+        color: var(--accent);
+        word-break: break-all;
+      }
+
+      .unavailable-meta {
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+
+      .empty {
+        padding: var(--space-6);
+        color: var(--text-secondary);
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      @media (hover: hover) and (pointer: fine) {
+        button:hover:not(:disabled) {
+          border-color: var(--accent-hover);
+          background: var(--accent-hover);
+        }
+
+        .secondary-button:hover:not(:disabled) {
+          border-color: transparent;
+          background: var(--danger-soft);
+          color: var(--danger-hover);
+        }
+
+        #clearReport:hover:not(:disabled) {
+          border-color: var(--danger-hover);
+          background: var(--danger-hover);
+          color: #ffffff;
+        }
+
+        .help-button:hover:not(:disabled) {
+          border-color: transparent;
+          background: transparent;
+          color: var(--text);
+        }
+
+        .theme-toggle:hover:not(:disabled) {
+          border-color: var(--neutral-hover-line);
+          background: var(--surface-subtle);
+          color: var(--text);
+        }
+
+        .unavailable-list a:hover {
+          color: var(--accent-hover);
+        }
+      }
+
+      @media (max-width: 860px) {
+        .app-header-inner {
+          min-height: 64px;
+          padding: 0 var(--space-3);
+        }
+
+        .app-header h1 {
+          font-size: 20px;
+        }
+
+        .session-user {
+          display: none;
+        }
+
+        main {
+          padding: var(--space-4) var(--space-3) var(--space-7);
+        }
+
+        .controls {
+          grid-template-columns: 1fr;
+          padding: var(--space-5);
+        }
+
+        .summary {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .actions button,
+        .controls button {
+          width: 100%;
+        }
+      }
+
+      @media (max-width: 420px) {
+        .summary {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+
+      @media (prefers-reduced-transparency: reduce) {
+        .app-header {
+          background: var(--page);
+          backdrop-filter: none;
+        }
+      }
+
+      @media (prefers-contrast: more) {
+        :root {
+          --line: #8b8b92;
+          --line-soft: #b7b7bd;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <section id="authGate" class="auth-gate" aria-labelledby="authHeading">
+      <form id="authForm" class="auth-panel">
+        <div class="auth-brand-row">
+          <div class="auth-brand">bm-blocked</div>
+          <button
+            class="theme-toggle"
+            type="button"
+            data-theme-toggle
+            aria-label="Включить тёмную тему"
+            title="Включить тёмную тему"
+          >
+            <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20.985 12.486A9 9 0 1 1 11.514 3.015 7 7 0 0 0 20.985 12.486Z" />
+            </svg>
+            <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.42" />
+            </svg>
+          </button>
+        </div>
+        <h1 id="authHeading">Вход</h1>
+        <p>Используйте общую учётную запись компании.</p>
+        <div class="auth-fields">
+          <div class="field">
+            <label for="authUsername">Логин</label>
+            <input id="authUsername" name="username" type="text" autocomplete="username" maxlength="128" required autofocus />
+          </div>
+          <div class="field">
+            <label for="authPassword">Пароль</label>
+            <input id="authPassword" name="password" type="password" autocomplete="current-password" maxlength="256" required />
+          </div>
+          <button id="authSubmit" type="submit">Войти</button>
+        </div>
+        <p id="authStatus" class="auth-status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <header id="appHeader" class="app-header" hidden>
+      <div class="app-header-inner">
+        <h1>bm-blocked</h1>
+        <div class="header-session">
+          <button
+            class="theme-toggle"
+            type="button"
+            data-theme-toggle
+            aria-label="Включить тёмную тему"
+            title="Включить тёмную тему"
+          >
+            <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20.985 12.486A9 9 0 1 1 11.514 3.015 7 7 0 0 0 20.985 12.486Z" />
+            </svg>
+            <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.42" />
+            </svg>
+          </button>
+          <span id="sessionUser" class="session-user"></span>
+          <button id="logoutButton" class="secondary-button header-logout" type="button">Выйти</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="workspace" hidden>
+
+      <section class="controls" aria-label="Параметры отчета">
+        <div class="field">
+          <label for="token">OAuth-токен Яндекс Директа</label>
+          <input
+            id="token"
+            name="token"
+            type="password"
+            autocomplete="off"
+            placeholder="Вставьте токен"
+            autofocus
+          />
+        </div>
+
+        <div id="clientField" class="field" hidden>
+          <label for="client">Клиент</label>
+          <select id="client" name="client" disabled>
+            <option value="">Сначала загрузите клиентов</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <button id="loadClients" type="button">Загрузить клиентов</button>
+        </div>
+      </section>
+
+      <section class="actions" aria-label="Действия">
+        <button id="loadReport" type="button" hidden disabled>
+          Получить список заблокированных площадок
+        </button>
+      </section>
+
+      <p id="status" class="status" role="status"></p>
+
+      <section id="summary" class="summary" hidden>
+        <div class="metric">
+          <strong id="campaignCount">0</strong>
+          <span>кампаний РСЯ</span>
+        </div>
+        <div class="metric">
+          <strong id="blockedCount">0</strong>
+          <span>заблокированных площадок</span>
+        </div>
+        <div id="unavailableWebMetric" class="metric" hidden>
+          <strong id="unavailableWebCount">0</strong>
+          <span>нерабочих web-площадок</span>
+        </div>
+        <div id="skippedAppsMetric" class="metric" hidden>
+          <strong id="skippedAppsCount">0</strong>
+          <span>app-площадок пропущено</span>
+        </div>
+      </section>
+
+      <section id="results" class="table-wrap" hidden>
+        <table>
+          <thead>
+            <tr>
+              <th class="select-column">
+                <input id="selectAllCampaigns" type="checkbox" aria-label="Выбрать все кампании" />
+              </th>
+              <th>Рекламная кампания</th>
+              <th>Количество заблокированных площадок</th>
+              <th id="unavailableWebHeader" hidden>Нерабочие web</th>
+            </tr>
+          </thead>
+          <tbody id="reportBody"></tbody>
+        </table>
+      </section>
+
+      <section id="postTableActions" class="actions" aria-label="Действия с таблицей" hidden>
+        <button id="checkReport" type="button" disabled>Проверить актуальность</button>
+        <button id="clearReport" type="button" class="secondary-button" hidden disabled>
+          Очистить
+        </button>
+      </section>
+
+      <div id="emptyState" class="table-wrap empty" hidden>
+        По выбранному клиенту не найдено активных кампаний, где в местах показа указана РСЯ.
+      </div>
+    </main>
+
+    <script>
+      const authGate = document.querySelector("#authGate");
+      const authForm = document.querySelector("#authForm");
+      const authUsernameInput = document.querySelector("#authUsername");
+      const authPasswordInput = document.querySelector("#authPassword");
+      const authSubmitButton = document.querySelector("#authSubmit");
+      const authStatusText = document.querySelector("#authStatus");
+      const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+      const themeToggleButtons = document.querySelectorAll("[data-theme-toggle]");
+      const appHeader = document.querySelector("#appHeader");
+      const workspace = document.querySelector("#workspace");
+      const sessionUser = document.querySelector("#sessionUser");
+      const logoutButton = document.querySelector("#logoutButton");
+      const tokenInput = document.querySelector("#token");
+      const clientSelect = document.querySelector("#client");
+      const clientField = document.querySelector("#clientField");
+      const loadClientsButton = document.querySelector("#loadClients");
+      const loadReportButton = document.querySelector("#loadReport");
+      const checkReportButton = document.querySelector("#checkReport");
+      const clearReportButton = document.querySelector("#clearReport");
+      const postTableActions = document.querySelector("#postTableActions");
+      const selectAllCampaigns = document.querySelector("#selectAllCampaigns");
+      const statusText = document.querySelector("#status");
+      const summary = document.querySelector("#summary");
+      const campaignCount = document.querySelector("#campaignCount");
+      const blockedCount = document.querySelector("#blockedCount");
+      const unavailableWebMetric = document.querySelector("#unavailableWebMetric");
+      const unavailableWebCount = document.querySelector("#unavailableWebCount");
+      const skippedAppsMetric = document.querySelector("#skippedAppsMetric");
+      const skippedAppsCount = document.querySelector("#skippedAppsCount");
+      const unavailableWebHeader = document.querySelector("#unavailableWebHeader");
+      const results = document.querySelector("#results");
+      const reportBody = document.querySelector("#reportBody");
+      const emptyState = document.querySelector("#emptyState");
+
+      let clients = [];
+      let currentCampaigns = [];
+      let hasActualityCheck = false;
+      const checkedCampaignIds = new Set();
+
+      function applyTheme(theme, persist = true) {
+        const normalizedTheme = theme === "dark" ? "dark" : "light";
+        document.documentElement.dataset.theme = normalizedTheme;
+        themeColorMeta.content = normalizedTheme === "dark" ? "#111315" : "#f5f5f7";
+
+        if (persist) {
+          try {
+            localStorage.setItem("bm-blocked-theme", normalizedTheme);
+          } catch (error) {
+          }
+        }
+
+        const label = normalizedTheme === "dark"
+          ? "Включить светлую тему"
+          : "Включить тёмную тему";
+
+        for (const button of themeToggleButtons) {
+          button.setAttribute("aria-label", label);
+          button.title = label;
+        }
+      }
+
+      applyTheme(document.documentElement.dataset.theme, false);
+
+      for (const button of themeToggleButtons) {
+        button.addEventListener("click", () => {
+          applyTheme(
+            document.documentElement.dataset.theme === "dark" ? "light" : "dark",
+          );
+        });
+      }
+
+      function setStatus(message, type = "") {
+        statusText.textContent = message;
+        statusText.classList.toggle("error", type === "error");
+        statusText.classList.toggle("success", type === "success");
+      }
+
+      function setBusy(button, isBusy, label) {
+        button.disabled = isBusy;
+
+        if (label) {
+          button.textContent = label;
+        }
+      }
+
+      function setAuthBusy(isBusy) {
+        authUsernameInput.disabled = isBusy;
+        authPasswordInput.disabled = isBusy;
+        authSubmitButton.disabled = isBusy;
+      }
+
+      function showWorkspace(username) {
+        authGate.hidden = true;
+        appHeader.hidden = false;
+        workspace.hidden = false;
+        sessionUser.textContent = username;
+        authPasswordInput.value = "";
+        authStatusText.textContent = "";
+        setAuthBusy(false);
+      }
+
+      function showLogin(message = "", configured = true) {
+        authGate.hidden = false;
+        appHeader.hidden = true;
+        workspace.hidden = true;
+        sessionUser.textContent = "";
+        tokenInput.value = "";
+        renderClients([]);
+        resetReport();
+        authStatusText.textContent = message;
+        authUsernameInput.disabled = !configured;
+        authPasswordInput.disabled = !configured;
+        authSubmitButton.disabled = !configured;
+
+        if (configured) {
+          authUsernameInput.focus();
+        }
+      }
+
+      async function initializeAuth() {
+        try {
+          const response = await fetch("/api/auth/status", {
+            headers: { Accept: "application/json" },
+          });
+          const payload = await response.json();
+
+          if (!payload.configured) {
+            showLogin(
+              "Авторизация не настроена. Запустите set-auth.ps1 на основном компьютере.",
+              false,
+            );
+            return;
+          }
+
+          if (payload.authenticated) {
+            showWorkspace(payload.username);
+            return;
+          }
+
+          showLogin();
+        } catch (error) {
+          showLogin("Не удалось проверить авторизацию. Перезапустите bm-blocked.", false);
+        }
+      }
+
+      async function authenticatedFetch(url, options) {
+        const response = await fetch(url, options);
+
+        if (response.status === 401) {
+          showLogin("Сессия завершена. Войдите снова.");
+        }
+
+        return response;
+      }
+
+      async function requestCheckNotificationPermission() {
+        if (!("Notification" in window) || Notification.permission !== "default") {
+          return;
+        }
+
+        try {
+          await Notification.requestPermission();
+        } catch (error) {
+        }
+      }
+
+      function notifyCheckCompletion(message) {
+        const pageIsActive = document.visibilityState === "visible" && document.hasFocus();
+
+        if (
+          pageIsActive ||
+          !("Notification" in window) ||
+          Notification.permission !== "granted"
+        ) {
+          return;
+        }
+
+        try {
+          new Notification("bm-blocked", {
+            body: message,
+            tag: "bm-blocked-check-complete",
+          });
+        } catch (error) {
+        }
+      }
+
+      function resetReport() {
+        currentCampaigns = [];
+        hasActualityCheck = false;
+        checkedCampaignIds.clear();
+        selectAllCampaigns.checked = false;
+        selectAllCampaigns.indeterminate = false;
+        postTableActions.hidden = true;
+        checkReportButton.disabled = true;
+        clearReportButton.hidden = true;
+        clearReportButton.disabled = true;
+        summary.hidden = true;
+        results.hidden = true;
+        emptyState.hidden = true;
+        unavailableWebMetric.hidden = true;
+        skippedAppsMetric.hidden = true;
+        unavailableWebHeader.hidden = true;
+        reportBody.innerHTML = "";
+        campaignCount.textContent = "0";
+        blockedCount.textContent = "0";
+        unavailableWebCount.textContent = "0";
+        skippedAppsCount.textContent = "0";
+      }
+
+      function renderClients(nextClients) {
+        clients = nextClients;
+        clientSelect.innerHTML = "";
+
+        if (clients.length === 0) {
+          clientField.hidden = true;
+          loadReportButton.hidden = true;
+          loadClientsButton.hidden = false;
+          clientSelect.disabled = true;
+          loadReportButton.disabled = true;
+          checkReportButton.disabled = true;
+          clientSelect.append(new Option("Клиенты не найдены", ""));
+          return;
+        }
+
+        clientField.hidden = false;
+        loadClientsButton.hidden = true;
+        loadReportButton.hidden = true;
+        clientSelect.disabled = false;
+        loadReportButton.disabled = true;
+        checkReportButton.disabled = true;
+        clientSelect.append(new Option("Выберите клиента", ""));
+
+        for (const client of clients) {
+          const option = new Option(client.name, client.login);
+          option.dataset.id = client.id || "";
+          clientSelect.append(option);
+        }
+      }
+
+      function getSelectedClient() {
+        return clients.find((client) => client.login === clientSelect.value);
+      }
+
+      function getUnavailableSitesByType(campaign, type) {
+        return (campaign.unavailableSites || []).filter((site) => site.type === type);
+      }
+
+      function countUnavailableSites(campaigns, type) {
+        return campaigns.reduce(
+          (sum, campaign) => sum + getUnavailableSitesByType(campaign, type).length,
+          0,
+        );
+      }
+
+      function renderReport(payload, options = {}) {
+        currentCampaigns = payload.campaigns || [];
+        hasActualityCheck = hasActualityCheck || Boolean(options.withActualityCheck);
+        reportBody.innerHTML = "";
+
+        campaignCount.textContent = String(payload.totalCampaigns || currentCampaigns.length);
+        blockedCount.textContent = String(payload.totalBlockedSites || 0);
+        unavailableWebCount.textContent = String(
+          payload.totalUnavailableWebSites ?? countUnavailableSites(currentCampaigns, "web"),
+        );
+        skippedAppsCount.textContent = String(payload.skippedAppSites || 0);
+        summary.hidden = false;
+        unavailableWebMetric.hidden = !hasActualityCheck;
+        skippedAppsMetric.hidden = !hasActualityCheck || !payload.skippedAppSites;
+        unavailableWebHeader.hidden = !hasActualityCheck;
+        results.hidden = currentCampaigns.length === 0;
+        emptyState.hidden = currentCampaigns.length > 0;
+        postTableActions.hidden = currentCampaigns.length === 0;
+        clearReportButton.hidden = !hasActualityCheck;
+        updateCheckButtonState();
+        updateClearButtonState();
+        updateSelectAllState();
+
+        for (const campaign of currentCampaigns) {
+          const row = document.createElement("tr");
+          const selectCell = document.createElement("td");
+          const checkbox = document.createElement("input");
+          const nameCell = document.createElement("td");
+          const countCell = document.createElement("td");
+
+          selectCell.className = "select-column";
+          checkbox.type = "checkbox";
+          checkbox.value = campaign.campaignId;
+          checkbox.checked = checkedCampaignIds.has(campaign.campaignId);
+          checkbox.setAttribute("aria-label", `Выбрать кампанию ${campaign.campaignName}`);
+          checkbox.addEventListener("change", () => {
+            if (checkbox.checked) {
+              checkedCampaignIds.add(campaign.campaignId);
+            } else {
+              checkedCampaignIds.delete(campaign.campaignId);
+            }
+
+            updateCheckButtonState();
+            updateClearButtonState();
+            updateSelectAllState();
+          });
+          selectCell.append(checkbox);
+          nameCell.textContent = campaign.campaignName;
+          countCell.textContent = String(campaign.blockedCount);
+          row.append(selectCell, nameCell, countCell);
+
+          if (hasActualityCheck) {
+            row.append(createUnavailableCell(row, campaign, "web"));
+          }
+
+          reportBody.append(row);
+        }
+      }
+
+      function createUnavailableCell(row, campaign, type) {
+        const cell = document.createElement("td");
+        const count = document.createElement("span");
+        const sites = getUnavailableSitesByType(campaign, type);
+        const isChecked = Array.isArray(campaign.unavailableSites);
+
+        count.textContent = isChecked ? String(sites.length) : "—";
+        cell.append(count);
+
+        if (sites.length > 0) {
+          const helpButton = document.createElement("button");
+
+          helpButton.type = "button";
+          helpButton.className = "help-button";
+          helpButton.textContent = "?";
+          helpButton.setAttribute(
+            "aria-label",
+            `Показать нерабочие ${type}-площадки кампании ${campaign.campaignName}`,
+          );
+          helpButton.addEventListener("click", () =>
+            toggleUnavailableDetails(row, campaign, type),
+          );
+          cell.append(helpButton);
+        }
+
+        return cell;
+      }
+
+      function updateCheckButtonState() {
+        const selectedCount = checkedCampaignIds.size;
+        checkReportButton.disabled = selectedCount === 0;
+        checkReportButton.textContent =
+          selectedCount > 0
+            ? `Проверить актуальность (${selectedCount})`
+            : "Проверить актуальность";
+      }
+
+      function campaignHasActualityCheck(campaign) {
+        return Array.isArray(campaign.unavailableSites);
+      }
+
+      function updateClearButtonState() {
+        const selectedCampaigns = currentCampaigns.filter((campaign) =>
+          checkedCampaignIds.has(campaign.campaignId),
+        );
+        const allSelectedChecked =
+          selectedCampaigns.length > 0 &&
+          selectedCampaigns.every(campaignHasActualityCheck);
+        const unavailableCount = selectedCampaigns.reduce(
+          (sum, campaign) => sum + (campaign.unavailableSites?.length || 0),
+          0,
+        );
+
+        clearReportButton.disabled =
+          !allSelectedChecked || unavailableCount === 0;
+
+        if (selectedCampaigns.length === 0) {
+          clearReportButton.title = "Выберите кампании.";
+        } else if (!allSelectedChecked) {
+          clearReportButton.title =
+            "Сначала проверьте актуальность всех выбранных кампаний.";
+        } else if (unavailableCount === 0) {
+          clearReportButton.title =
+            "В выбранных кампаниях нет нерабочих площадок.";
+        } else {
+          clearReportButton.title = "";
+        }
+      }
+
+      function updateSelectAllState() {
+        if (currentCampaigns.length === 0) {
+          selectAllCampaigns.checked = false;
+          selectAllCampaigns.indeterminate = false;
+          return;
+        }
+
+        const selectedCount = currentCampaigns.filter((campaign) =>
+          checkedCampaignIds.has(campaign.campaignId),
+        ).length;
+
+        selectAllCampaigns.checked = selectedCount === currentCampaigns.length;
+        selectAllCampaigns.indeterminate =
+          selectedCount > 0 && selectedCount < currentCampaigns.length;
+      }
+
+      function getPlacementHref(site) {
+        if (site.url) {
+          return site.url;
+        }
+
+        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(site.placement)) {
+          return site.placement;
+        }
+
+        return `https://${site.placement}`;
+      }
+
+      function getUnavailableReason(site) {
+        if (site.error === "redirected_to_other_domain") {
+          return " редирект на другой домен";
+        }
+
+        if (site.error === "http_error_page") {
+          return " страница ошибки";
+        }
+
+        if (site.error === "suspicious_redirect") {
+          return " рекламный редирект";
+        }
+
+        if (site.statusCode) {
+          return ` HTTP ${site.statusCode}`;
+        }
+
+        return site.error ? ` ${site.error}` : "";
+      }
+
+      function toggleUnavailableDetails(row, campaign, type) {
+        const nextRow = row.nextElementSibling;
+        const detailsKey = `${campaign.campaignId}:${type}`;
+
+        if (nextRow?.dataset.detailsFor === detailsKey) {
+          nextRow.remove();
+          return;
+        }
+
+        for (const detailsRow of reportBody.querySelectorAll("[data-details-for]")) {
+          detailsRow.remove();
+        }
+
+        const detailsRow = document.createElement("tr");
+        const detailsCell = document.createElement("td");
+        const counter = document.createElement("span");
+        const list = document.createElement("ul");
+        const allSites = getUnavailableSitesByType(campaign, type).sort((left, right) => {
+          return left.placement.localeCompare(right.placement, "ru");
+        });
+        const columnCount = hasActualityCheck ? 4 : 3;
+
+        detailsRow.dataset.detailsFor = detailsKey;
+        detailsCell.colSpan = columnCount;
+        detailsCell.className = "unavailable-list-cell";
+        counter.className = "unavailable-meta";
+        counter.textContent = `Нерабочих ${type}-площадок: ${allSites.length}.`;
+        list.className = "unavailable-list";
+
+        renderUnavailableList(list, allSites);
+        detailsCell.append(counter, list);
+        detailsRow.append(detailsCell);
+        row.after(detailsRow);
+      }
+
+      function renderUnavailableList(list, sites) {
+        list.innerHTML = "";
+
+        for (const site of sites) {
+          const item = document.createElement("li");
+          const link = document.createElement("a");
+          const meta = document.createElement("span");
+
+          link.href = getPlacementHref(site);
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.textContent = site.placement;
+          meta.className = "unavailable-meta";
+          meta.textContent = getUnavailableReason(site);
+          item.append(link, meta);
+          list.append(item);
+        }
+      }
+
+      function mergeCheckedCampaigns(checkedCampaigns) {
+        const checkedById = new Map(
+          checkedCampaigns.map((campaign) => [campaign.campaignId, campaign]),
+        );
+
+        currentCampaigns = currentCampaigns.map((campaign) => {
+          return checkedById.has(campaign.campaignId)
+            ? { ...campaign, ...checkedById.get(campaign.campaignId) }
+            : campaign;
+        });
+
+        return currentCampaigns;
+      }
+
+      async function postJson(url, body) {
+        const response = await authenticatedFetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload.error || "Запрос завершился с ошибкой.");
+        }
+
+        return payload;
+      }
+
+      loadClientsButton.addEventListener("click", async () => {
+        const token = tokenInput.value.trim();
+
+        if (!token) {
+          setStatus("Введите OAuth-токен.", "error");
+          tokenInput.focus();
+          return;
+        }
+
+        resetReport();
+        renderClients([]);
+        setStatus("Загружаю клиентов...");
+        setBusy(loadClientsButton, true, "Загрузка...");
+
+        try {
+          const payload = await postJson("/api/direct-clients", { token });
+          renderClients(payload.clients || []);
+          setStatus(`Загружено клиентов: ${(payload.clients || []).length}.`, "success");
+        } catch (error) {
+          setStatus(error.message, "error");
+        } finally {
+          setBusy(loadClientsButton, false, "Загрузить клиентов");
+        }
+      });
+
+      loadReportButton.addEventListener("click", async () => {
+        const token = tokenInput.value.trim();
+        const client = getSelectedClient();
+
+        if (!token) {
+          setStatus("Введите OAuth-токен.", "error");
+          tokenInput.focus();
+          return;
+        }
+
+        if (!client) {
+          setStatus("Выберите клиента.", "error");
+          clientSelect.focus();
+          return;
+        }
+
+        resetReport();
+        setStatus("Получаю активные кампании РСЯ и заблокированные площадки...");
+        setBusy(loadReportButton, true, "Получение...");
+
+        try {
+          const payload = await postJson("/api/blocked-placements", {
+            token,
+            clientLogin: client.login,
+          });
+          checkedCampaignIds.clear();
+          renderReport(payload);
+          setStatus("Отчет сформирован.", "success");
+        } catch (error) {
+          setStatus(error.message, "error");
+        } finally {
+          setBusy(loadReportButton, false, "Получить список заблокированных площадок");
+        }
+      });
+
+      checkReportButton.addEventListener("click", async () => {
+        const token = tokenInput.value.trim();
+        const client = getSelectedClient();
+
+        if (!token || !client) {
+          setStatus("Сначала загрузите клиентов и выберите клиента.", "error");
+          return;
+        }
+
+        if (checkedCampaignIds.size === 0) {
+          setStatus("Выберите кампании для проверки.", "error");
+          return;
+        }
+
+        const campaignIds = Array.from(checkedCampaignIds);
+
+        await requestCheckNotificationPermission();
+        setStatus("Проверяю web-площадки выбранных кампаний. App-площадки будут пропущены...");
+        setBusy(checkReportButton, true, "Проверка...");
+        loadReportButton.disabled = true;
+
+        try {
+          const payload = await postJson("/api/check-placements", {
+            token,
+            clientLogin: client.login,
+            campaignIds,
+          });
+          const mergedCampaigns = mergeCheckedCampaigns(payload.campaigns || []);
+          renderReport({
+            campaigns: mergedCampaigns,
+            totalCampaigns: mergedCampaigns.length,
+            totalBlockedSites: mergedCampaigns.reduce((sum, campaign) => sum + campaign.blockedCount, 0),
+            totalUnavailableSites: mergedCampaigns.reduce(
+              (sum, campaign) => sum + (campaign.unavailableCount || 0),
+              0,
+            ),
+            skippedAppSites: payload.skippedAppSites || 0,
+          }, { withActualityCheck: true });
+          setStatus(
+            `Проверка завершена. Проверено кампаний: ${payload.totalCampaigns || 0}.`,
+            "success",
+          );
+          notifyCheckCompletion(
+            `Проверка завершена. Проверено кампаний: ${payload.totalCampaigns || 0}.`,
+          );
+        } catch (error) {
+          setStatus(error.message, "error");
+          notifyCheckCompletion(`Проверка завершилась ошибкой: ${error.message}`);
+        } finally {
+          setBusy(checkReportButton, false, "Проверить актуальность");
+          updateCheckButtonState();
+          loadReportButton.disabled = false;
+        }
+      });
+
+      clearReportButton.addEventListener("click", async () => {
+        const token = tokenInput.value.trim();
+        const client = getSelectedClient();
+        const selectedCampaigns = currentCampaigns.filter((campaign) =>
+          checkedCampaignIds.has(campaign.campaignId),
+        );
+
+        if (!token || !client) {
+          setStatus(
+            "Сначала загрузите клиентов и выберите клиента.",
+            "error",
+          );
+          return;
+        }
+
+        if (
+          selectedCampaigns.length === 0 ||
+          selectedCampaigns.some((campaign) => !campaignHasActualityCheck(campaign))
+        ) {
+          setStatus(
+            "Сначала проверьте актуальность всех выбранных кампаний.",
+            "error",
+          );
+          updateClearButtonState();
+          return;
+        }
+
+        const campaignsToClear = selectedCampaigns
+          .map((campaign) => ({
+            campaignId: campaign.campaignId,
+            unavailablePlacements: campaign.unavailableSites.map(
+              (site) => site.placement,
+            ),
+          }))
+          .filter((campaign) => campaign.unavailablePlacements.length > 0);
+
+        if (campaignsToClear.length === 0) {
+          setStatus("В выбранных кампаниях нет нерабочих площадок.", "error");
+          updateClearButtonState();
+          return;
+        }
+
+        setStatus("Удаляю нерабочие площадки из выбранных кампаний...");
+        setBusy(clearReportButton, true, "Очистка...");
+        checkReportButton.disabled = true;
+        loadReportButton.disabled = true;
+
+        try {
+          const payload = await postJson("/api/clear-placements", {
+            token,
+            clientLogin: client.login,
+            campaigns: campaignsToClear,
+          });
+          const updatedById = new Map(
+            (payload.updatedCampaigns || []).map((campaign) => [
+              campaign.campaignId,
+              campaign,
+            ]),
+          );
+
+          currentCampaigns = currentCampaigns.map((campaign) => {
+            const update = updatedById.get(campaign.campaignId);
+
+            if (!update) {
+              return campaign;
+            }
+
+            return {
+              ...campaign,
+              blockedCount: update.blockedCount,
+              unavailableCount: 0,
+              unavailableSites: [],
+            };
+          });
+
+          renderReport({
+            campaigns: currentCampaigns,
+            totalCampaigns: currentCampaigns.length,
+            totalBlockedSites: currentCampaigns.reduce(
+              (sum, campaign) => sum + campaign.blockedCount,
+              0,
+            ),
+            totalUnavailableSites: currentCampaigns.reduce(
+              (sum, campaign) => sum + (campaign.unavailableCount || 0),
+              0,
+            ),
+            skippedAppSites: Number(skippedAppsCount.textContent) || 0,
+          }, { withActualityCheck: true });
+
+          const failedCount = (payload.failedCampaigns || []).length;
+          setStatus(
+            failedCount > 0
+              ? `Удалено площадок: ${payload.totalRemoved || 0}. Не удалось обновить кампаний: ${failedCount}.`
+              : `Удалено нерабочих площадок: ${payload.totalRemoved || 0}.`,
+            failedCount > 0 ? "error" : "success",
+          );
+        } catch (error) {
+          setStatus(error.message, "error");
+        } finally {
+          setBusy(clearReportButton, false, "Очистить");
+          updateCheckButtonState();
+          updateClearButtonState();
+          loadReportButton.disabled = false;
+        }
+      });
+
+      selectAllCampaigns.addEventListener("change", () => {
+        checkedCampaignIds.clear();
+
+        if (selectAllCampaigns.checked) {
+          for (const campaign of currentCampaigns) {
+            checkedCampaignIds.add(campaign.campaignId);
+          }
+        }
+
+        renderReport({
+          campaigns: currentCampaigns,
+          totalCampaigns: currentCampaigns.length,
+          totalBlockedSites: currentCampaigns.reduce((sum, campaign) => sum + campaign.blockedCount, 0),
+          totalUnavailableSites: currentCampaigns.reduce(
+            (sum, campaign) => sum + (campaign.unavailableCount || 0),
+            0,
+          ),
+          skippedAppSites: Number(skippedAppsCount.textContent) || 0,
+        }, { withActualityCheck: hasActualityCheck });
+      });
+
+      clientSelect.addEventListener("change", resetReport);
+      clientSelect.addEventListener("change", () => {
+        loadReportButton.hidden = !clientSelect.value;
+        loadReportButton.disabled = !clientSelect.value;
+      });
+      tokenInput.addEventListener("input", () => {
+        renderClients([]);
+        loadClientsButton.hidden = false;
+        resetReport();
+        setStatus("");
+      });
+
+      authForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setAuthBusy(true);
+        authStatusText.textContent = "Проверяю данные...";
+
+        try {
+          const response = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: authUsernameInput.value.trim(),
+              password: authPasswordInput.value,
+            }),
+          });
+          const payload = await response.json();
+
+          if (!response.ok) {
+            throw new Error(payload.error || "Не удалось выполнить вход.");
+          }
+
+          showWorkspace(payload.username);
+        } catch (error) {
+          authPasswordInput.value = "";
+          authStatusText.textContent = error.message;
+          authPasswordInput.focus();
+          setAuthBusy(false);
+        }
+      });
+
+      logoutButton.addEventListener("click", async () => {
+        logoutButton.disabled = true;
+
+        try {
+          await fetch("/api/auth/logout", { method: "POST" });
+        } finally {
+          logoutButton.disabled = false;
+          showLogin("Вы вышли из bm-blocked.");
+        }
+      });
+
+      initializeAuth();
+    </script>
+  </body>
+</html>

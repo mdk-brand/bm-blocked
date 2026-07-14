@@ -1,0 +1,10 @@
+node_modules/
+.npm-cache/
+build/
+dist/
+*.zip
+auth-config.json
+key web.txt
+minus.txt
+kuh1.jpg
+kuh2.jpg

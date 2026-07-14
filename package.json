@@ -1,0 +1,10 @@
+{
+  "name": "bm-blocked",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:exe": "powershell -ExecutionPolicy Bypass -File ./build-exe.ps1",
+    "build:tray": "powershell -ExecutionPolicy Bypass -File ./build-exe.ps1"
+  }
+}
