@@ -53,6 +53,7 @@
         --neutral-hover-line: #bcbcc2;
         --success-hover-line: #a8d8bf;
         --shadow-float: 0 18px 50px rgba(0, 0, 0, 0.09);
+        --modal-scrim: rgba(17, 19, 21, 0.38);
         --radius-sm: 6px;
         --radius-md: 8px;
         --control-height: 44px;
@@ -101,6 +102,7 @@
         --neutral-hover-line: #565b64;
         --success-hover-line: #347454;
         --shadow-float: 0 18px 50px rgba(0, 0, 0, 0.35);
+        --modal-scrim: rgba(0, 0, 0, 0.66);
       }
 
       *,
@@ -179,6 +181,110 @@
         margin: var(--space-4) 0 0;
         color: var(--danger);
         font-size: 14px;
+      }
+
+      .update-overlay {
+        position: fixed;
+        z-index: 100;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: var(--space-6);
+        background: var(--modal-scrim);
+      }
+
+      .update-panel {
+        display: flex;
+        width: min(100%, 420px);
+        max-height: min(520px, calc(100vh - 48px));
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        box-shadow: var(--shadow-float);
+      }
+
+      .update-heading {
+        padding: var(--space-7) var(--space-8) var(--space-4);
+      }
+
+      .update-heading h2 {
+        margin: 0 0 var(--space-1);
+        font-size: 24px;
+        line-height: 1.25;
+      }
+
+      .update-heading p {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
+
+      .update-notes {
+        min-height: 140px;
+        padding: 0 var(--space-8) var(--space-5);
+        overflow: auto;
+        color: var(--text);
+        overflow-wrap: anywhere;
+      }
+
+      .update-notes h1,
+      .update-notes h2,
+      .update-notes h3 {
+        margin: var(--space-5) 0 var(--space-2);
+        font-size: 17px;
+        line-height: 1.35;
+      }
+
+      .update-notes p,
+      .update-notes ul,
+      .update-notes ol,
+      .update-notes pre {
+        margin: 0 0 var(--space-3);
+      }
+
+      .update-notes ul,
+      .update-notes ol {
+        padding-left: var(--space-6);
+      }
+
+      .update-notes code {
+        padding: 2px 5px;
+        border-radius: 4px;
+        background: var(--surface-pressed);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 13px;
+      }
+
+      .update-notes pre {
+        padding: var(--space-3);
+        overflow: auto;
+        border-radius: var(--radius-sm);
+        background: var(--surface-subtle);
+        white-space: pre-wrap;
+      }
+
+      .update-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--space-3);
+        padding: var(--space-4) var(--space-8) var(--space-7);
+        border-top: 1px solid var(--line-soft);
+      }
+
+      .update-later {
+        border-color: var(--line);
+        background: var(--surface);
+        color: var(--text);
+      }
+
+      .update-status {
+        min-height: 20px;
+        margin: 0;
+        padding: 0 var(--space-8);
+        color: var(--danger);
+        font-size: 13px;
       }
 
       .app-header {
@@ -593,6 +699,12 @@
           color: var(--danger-hover);
         }
 
+        .update-later:hover:not(:disabled) {
+          border-color: var(--neutral-hover-line);
+          background: var(--surface-subtle);
+          color: var(--text);
+        }
+
         #clearReport:hover:not(:disabled) {
           border-color: var(--danger-hover);
           background: var(--danger-hover);
@@ -715,6 +827,28 @@
         </div>
         <p id="authStatus" class="auth-status" aria-live="polite"></p>
       </form>
+    </section>
+
+    <section
+      id="updateDialog"
+      class="update-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="updateHeading"
+      hidden
+    >
+      <div class="update-panel">
+        <div class="update-heading">
+          <h2 id="updateHeading">Что нового?</h2>
+          <p id="updateVersion"></p>
+        </div>
+        <div id="updateNotes" class="update-notes"></div>
+        <p id="updateStatus" class="update-status" aria-live="polite"></p>
+        <div class="update-actions">
+          <button id="updateLater" class="update-later" type="button">Отложить</button>
+          <button id="updateInstall" type="button">Установить</button>
+        </div>
+      </div>
     </section>
 
     <header id="appHeader" class="app-header" hidden>
@@ -858,10 +992,19 @@
       const results = document.querySelector("#results");
       const reportBody = document.querySelector("#reportBody");
       const emptyState = document.querySelector("#emptyState");
+      const updateDialog = document.querySelector("#updateDialog");
+      const updateHeading = document.querySelector("#updateHeading");
+      const updateVersion = document.querySelector("#updateVersion");
+      const updateNotes = document.querySelector("#updateNotes");
+      const updateStatus = document.querySelector("#updateStatus");
+      const updateInstallButton = document.querySelector("#updateInstall");
+      const updateLaterButton = document.querySelector("#updateLater");
 
       let clients = [];
       let currentCampaigns = [];
       let hasActualityCheck = false;
+      let updatePollTimer = null;
+      let displayedUpdateRevision = -1;
       const checkedCampaignIds = new Set();
 
       function applyTheme(theme, persist = true) {
@@ -916,6 +1059,158 @@
         authSubmitButton.disabled = isBusy;
       }
 
+      function appendReleaseInline(parent, text) {
+        const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))/g;
+        let cursor = 0;
+
+        for (const match of text.matchAll(pattern)) {
+          parent.append(document.createTextNode(text.slice(cursor, match.index)));
+          const token = match[0];
+
+          if (token.startsWith("**")) {
+            const strong = document.createElement("strong");
+            strong.textContent = token.slice(2, -2);
+            parent.append(strong);
+          } else if (token.startsWith("`")) {
+            const code = document.createElement("code");
+            code.textContent = token.slice(1, -1);
+            parent.append(code);
+          } else {
+            const parts = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/.exec(token);
+            const link = document.createElement("a");
+            link.textContent = parts[1];
+            link.href = parts[2];
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            parent.append(link);
+          }
+
+          cursor = match.index + token.length;
+        }
+
+        parent.append(document.createTextNode(text.slice(cursor)));
+      }
+
+      function renderReleaseNotes(markdown) {
+        updateNotes.innerHTML = "";
+        const lines = String(markdown || "Описание изменений не указано.")
+          .replace(/\r\n?/g, "\n")
+          .split("\n");
+        let list = null;
+        let codeBlock = null;
+
+        for (const line of lines) {
+          if (line.startsWith("```")) {
+            if (codeBlock) {
+              updateNotes.append(codeBlock);
+              codeBlock = null;
+            } else {
+              codeBlock = document.createElement("pre");
+            }
+            list = null;
+            continue;
+          }
+
+          if (codeBlock) {
+            codeBlock.textContent += `${codeBlock.textContent ? "\n" : ""}${line}`;
+            continue;
+          }
+
+          const headingMatch = /^(#{1,3})\s+(.+)$/.exec(line);
+          const unorderedMatch = /^\s*[-*]\s+(.+)$/.exec(line);
+          const orderedMatch = /^\s*\d+\.\s+(.+)$/.exec(line);
+
+          if (headingMatch) {
+            const heading = document.createElement(`h${headingMatch[1].length}`);
+            appendReleaseInline(heading, headingMatch[2]);
+            updateNotes.append(heading);
+            list = null;
+          } else if (unorderedMatch || orderedMatch) {
+            const listTag = unorderedMatch ? "ul" : "ol";
+
+            if (!list || list.tagName.toLowerCase() !== listTag) {
+              list = document.createElement(listTag);
+              updateNotes.append(list);
+            }
+
+            const item = document.createElement("li");
+            appendReleaseInline(item, (unorderedMatch || orderedMatch)[1]);
+            list.append(item);
+          } else if (line.trim()) {
+            const paragraph = document.createElement("p");
+            appendReleaseInline(paragraph, line.trim());
+            updateNotes.append(paragraph);
+            list = null;
+          } else {
+            list = null;
+          }
+        }
+
+        if (codeBlock) {
+          updateNotes.append(codeBlock);
+        }
+      }
+
+      function hideUpdateDialog() {
+        updateDialog.hidden = true;
+        updateStatus.textContent = "";
+        updateInstallButton.disabled = false;
+        updateLaterButton.disabled = false;
+      }
+
+      function showUpdateDialog(payload) {
+        displayedUpdateRevision = payload.revision;
+        updateHeading.textContent = "Что нового?";
+        updateVersion.textContent = payload.name || payload.tag;
+        renderReleaseNotes(payload.notes);
+        updateStatus.textContent = "";
+        updateDialog.hidden = false;
+        updateInstallButton.focus();
+      }
+
+      async function pollUpdateStatus() {
+        try {
+          const response = await authenticatedFetch("/api/update-status", {
+            headers: { Accept: "application/json" },
+          });
+
+          if (!response.ok) {
+            return;
+          }
+
+          const payload = await response.json();
+
+          if (
+            payload.available &&
+            payload.showReleaseNotes &&
+            payload.revision !== displayedUpdateRevision
+          ) {
+            showUpdateDialog(payload);
+          } else if (!payload.showReleaseNotes && !updateDialog.hidden) {
+            hideUpdateDialog();
+          }
+        } catch (error) {
+        }
+      }
+
+      function startUpdatePolling() {
+        if (updatePollTimer !== null) {
+          return;
+        }
+
+        pollUpdateStatus();
+        updatePollTimer = window.setInterval(pollUpdateStatus, 1500);
+      }
+
+      function stopUpdatePolling() {
+        if (updatePollTimer !== null) {
+          window.clearInterval(updatePollTimer);
+          updatePollTimer = null;
+        }
+
+        hideUpdateDialog();
+      }
+
       function showWorkspace(username) {
         authGate.hidden = true;
         appHeader.hidden = false;
@@ -924,9 +1219,11 @@
         authPasswordInput.value = "";
         authStatusText.textContent = "";
         setAuthBusy(false);
+        startUpdatePolling();
       }
 
       function showLogin(message = "", configured = true) {
+        stopUpdatePolling();
         authGate.hidden = false;
         appHeader.hidden = true;
         workspace.hidden = true;
@@ -1568,6 +1865,31 @@
         loadClientsButton.hidden = false;
         resetReport();
         setStatus("");
+      });
+
+      async function performUpdateAction(action) {
+        updateInstallButton.disabled = true;
+        updateLaterButton.disabled = true;
+        updateStatus.textContent = action === "install"
+          ? "Начинаю установку..."
+          : "Обновление отложено.";
+
+        try {
+          await postJson("/api/update-action", { action });
+          hideUpdateDialog();
+        } catch (error) {
+          updateStatus.textContent = error.message;
+          updateInstallButton.disabled = false;
+          updateLaterButton.disabled = false;
+        }
+      }
+
+      updateInstallButton.addEventListener("click", () => {
+        performUpdateAction("install");
+      });
+
+      updateLaterButton.addEventListener("click", () => {
+        performUpdateAction("later");
       });
 
       authForm.addEventListener("submit", async (event) => {

@@ -12,19 +12,23 @@ using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
+using Microsoft.Toolkit.Uwp.Notifications;
 
 [assembly: System.Reflection.AssemblyTitle("bm-blocked")]
 [assembly: System.Reflection.AssemblyDescription("Проверка заблокированных площадок Яндекс Директа")]
 [assembly: System.Reflection.AssemblyCompany("Brandmaker")]
 [assembly: System.Reflection.AssemblyProduct("bm-blocked")]
-[assembly: System.Reflection.AssemblyVersion("1.0.2.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.2.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.3.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.3.0")]
 
 namespace BmBlocked
 {
     internal static class Program
     {
         private const string SingleInstanceMutexName = @"Local\BmBlockedSingleInstance";
+        private static readonly object ToastActionSync = new object();
+        private static Action<string> toastActionHandler;
+        private static string pendingToastAction;
 
         [STAThread]
         private static void Main(string[] args)
@@ -37,6 +41,7 @@ namespace BmBlocked
                 return;
             }
 
+            InitializeToastActivation();
             CleanupOldUpdaterCopies();
             bool isFirstInstance;
 
@@ -63,6 +68,71 @@ namespace BmBlocked
             return "\"" + (value ?? "").Replace("\"", "\\\"") + "\"";
         }
 
+        internal static void SetToastActionHandler(Action<string> handler)
+        {
+            string pendingAction;
+
+            lock (ToastActionSync)
+            {
+                toastActionHandler = handler;
+                pendingAction = pendingToastAction;
+                pendingToastAction = null;
+            }
+
+            if (handler != null && !String.IsNullOrWhiteSpace(pendingAction))
+            {
+                handler(pendingAction);
+            }
+        }
+
+        private static void InitializeToastActivation()
+        {
+            try
+            {
+                ToastNotificationManagerCompat.OnActivated += delegate(
+                    ToastNotificationActivatedEventArgsCompat args)
+                {
+                    string action;
+
+                    try
+                    {
+                        action = ToastArguments.Parse(args.Argument).Get("action");
+                    }
+                    catch
+                    {
+                        action = "";
+                    }
+
+                    if (String.IsNullOrWhiteSpace(action))
+                    {
+                        return;
+                    }
+
+                    Action<string> handler;
+
+                    lock (ToastActionSync)
+                    {
+                        handler = toastActionHandler;
+
+                        if (handler == null)
+                        {
+                            pendingToastAction = action;
+                        }
+                    }
+
+                    if (handler != null)
+                    {
+                        handler(action);
+                    }
+                };
+
+                ToastNotificationManagerCompat.WasCurrentProcessToastActivated();
+            }
+            catch
+            {
+            }
+        }
+
         private static void CleanupOldUpdaterCopies()
         {
             try
@@ -76,6 +146,18 @@ namespace BmBlocked
                         try { File.Delete(file); } catch { }
                     }
                 }
+
+                foreach (var directory in Directory.GetDirectories(
+                    Path.GetTempPath(),
+                    "bm-blocked-updater-*"))
+                {
+                    if (!currentPath.StartsWith(
+                        Path.GetFullPath(directory) + Path.DirectorySeparatorChar,
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        try { Directory.Delete(directory, true); } catch { }
+                    }
+                }
             }
             catch
             {
@@ -86,6 +168,8 @@ namespace BmBlocked
     internal sealed class ReleaseInfo
     {
         internal string TagName;
+        internal string Name;
+        internal string Notes;
         internal Version Version;
         internal string ZipUrl;
         internal string ChecksumUrl;
@@ -165,6 +249,8 @@ namespace BmBlocked
             return new ReleaseInfo
             {
                 TagName = tagName,
+                Name = payload.ContainsKey("name") ? Convert.ToString(payload["name"]) : tagName,
+                Notes = payload.ContainsKey("body") ? Convert.ToString(payload["body"]) : "",
                 Version = releaseVersion,
                 ZipUrl = zipUrl,
                 ChecksumUrl = checksumUrl
@@ -304,6 +390,8 @@ namespace BmBlocked
             var requiredFiles = new[]
             {
                 "bm-blocked.exe",
+                "Microsoft.Toolkit.Uwp.Notifications.dll",
+                "System.ValueTuple.dll",
                 "server.js",
                 "index.html",
                 Path.Combine("runtime", "node.exe")
@@ -366,7 +454,7 @@ namespace BmBlocked
                 }
 
                 TryDeleteUpdateDirectory(stagingDirectory);
-                MoveFileEx(Application.ExecutablePath, null, MoveFileDelayUntilReboot);
+                ScheduleUpdaterCleanup();
             }
             catch (Exception error)
             {
@@ -376,6 +464,27 @@ namespace BmBlocked
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }
+        }
+
+        private static void ScheduleUpdaterCleanup()
+        {
+            var executablePath = Path.GetFullPath(Application.ExecutablePath);
+            var updaterDirectory = new DirectoryInfo(Path.GetDirectoryName(executablePath));
+
+            if (updaterDirectory.Name.StartsWith(
+                "bm-blocked-updater-",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var file in updaterDirectory.GetFiles())
+                {
+                    MoveFileEx(file.FullName, null, MoveFileDelayUntilReboot);
+                }
+
+                MoveFileEx(updaterDirectory.FullName, null, MoveFileDelayUntilReboot);
+                return;
+            }
+
+            MoveFileEx(executablePath, null, MoveFileDelayUntilReboot);
         }
 
         private static void WaitForParent(int parentProcessId)
@@ -516,6 +625,7 @@ namespace BmBlocked
         private const string Url = "http://127.0.0.1:8124/index.html";
         private readonly string notificationPipeName =
             "bm-blocked-notifications-" + Process.GetCurrentProcess().Id;
+        private readonly string internalToken = Guid.NewGuid().ToString("N");
         private readonly NotifyIcon trayIcon;
         private readonly ToolStripMenuItem checkUpdatesItem;
         private readonly ToolStripMenuItem installUpdateItem;
@@ -528,8 +638,12 @@ namespace BmBlocked
         private NamedPipeServerStream activeNotificationPipe;
         private Action balloonClickAction;
         private Process serverProcess;
+        private ReleaseInfo availableRelease;
         private PreparedUpdate pendingUpdate;
+        private string deferredReleaseTag;
+        private DateTime deferredUntilUtc;
         private int updateCheckRunning;
+        private int updateDownloadRunning;
         private volatile bool notificationListenerStopping;
         private bool exiting;
 
@@ -537,13 +651,14 @@ namespace BmBlocked
         {
             dispatcher = new Control();
             dispatcher.CreateControl();
+            Program.SetToastActionHandler(HandleUpdateAction);
 
             checkUpdatesItem = new ToolStripMenuItem("Проверить обновления");
             checkUpdatesItem.Click += delegate { CheckForUpdates(true); };
 
             installUpdateItem = new ToolStripMenuItem("Обновлений нет");
             installUpdateItem.Enabled = false;
-            installUpdateItem.Click += delegate { ConfirmAndApplyUpdate(); };
+            installUpdateItem.Click += delegate { InstallAvailableUpdate(); };
 
             trayIcon = new NotifyIcon
             {
@@ -603,11 +718,11 @@ namespace BmBlocked
 
         private void CheckForUpdates(bool userInitiated)
         {
-            if (pendingUpdate != null)
+            if (pendingUpdate != null || Interlocked.CompareExchange(ref updateDownloadRunning, 0, 0) != 0)
             {
                 if (userInitiated)
                 {
-                    SafeBeginInvoke(delegate { ConfirmAndApplyUpdate(); });
+                    SafeBeginInvoke(delegate { InstallAvailableUpdate(); });
                 }
                 return;
             }
@@ -634,7 +749,10 @@ namespace BmBlocked
                     {
                         SafeBeginInvoke(delegate
                         {
+                            availableRelease = null;
+                            pendingUpdate = null;
                             ResetUpdateMenu();
+                            PublishUpdateState(null, false);
 
                             if (userInitiated)
                             {
@@ -646,29 +764,40 @@ namespace BmBlocked
 
                     SafeBeginInvoke(delegate
                     {
-                        checkUpdatesItem.Text = "Скачиваю " + release.TagName + "...";
-                    });
-
-                    var prepared = UpdateClient.PrepareUpdate(release);
-
-                    SafeBeginInvoke(delegate
-                    {
-                        pendingUpdate = prepared;
+                        availableRelease = release;
                         checkUpdatesItem.Enabled = true;
                         checkUpdatesItem.Text = "Проверить обновления";
                         installUpdateItem.Enabled = true;
                         installUpdateItem.Text = "Установить " + release.TagName;
-                        ShowBalloon(
-                            "Обновление готово",
-                            release.TagName + " скачано и проверено. Нажмите уведомление для установки.",
-                            ConfirmAndApplyUpdate);
+                        PublishUpdateState(release, false);
+
+                        if (
+                            userInitiated ||
+                            !String.Equals(
+                                deferredReleaseTag,
+                                release.TagName,
+                                StringComparison.OrdinalIgnoreCase) ||
+                            DateTime.UtcNow >= deferredUntilUtc)
+                        {
+                            ShowUpdateToast(release);
+                        }
                     });
                 }
                 catch (Exception error)
                 {
                     SafeBeginInvoke(delegate
                     {
-                        ResetUpdateMenu();
+                        if (availableRelease == null)
+                        {
+                            ResetUpdateMenu();
+                        }
+                        else
+                        {
+                            checkUpdatesItem.Enabled = true;
+                            checkUpdatesItem.Text = "Проверить обновления";
+                            installUpdateItem.Enabled = true;
+                            installUpdateItem.Text = "Установить " + availableRelease.TagName;
+                        }
 
                         if (userInitiated)
                         {
@@ -695,48 +824,236 @@ namespace BmBlocked
             installUpdateItem.Text = "Обновлений нет";
         }
 
-        private void ConfirmAndApplyUpdate()
+        private void ShowUpdateToast(ReleaseInfo release)
         {
-            if (pendingUpdate == null || exiting)
+            if (release == null || exiting)
             {
                 return;
             }
 
-            var answer = MessageBox.Show(
-                "Установить " + pendingUpdate.Release.TagName + " сейчас? bm-blocked будет перезапущен.",
-                "Обновление bm-blocked",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Information);
+            try
+            {
+                RemoveUpdateToast();
 
-            if (answer != DialogResult.Yes)
+                new ToastContentBuilder()
+                    .AddArgument("action", "whats-new")
+                    .AddText("Доступна новая версия " + release.TagName)
+                    .AddText("Обновление будет скачано только после вашего подтверждения.")
+                    .AddButton(new ToastButton()
+                        .SetContent("Установить")
+                        .AddArgument("action", "install"))
+                    .AddButton(new ToastButton()
+                        .SetContent("Отложить")
+                        .AddArgument("action", "later"))
+                    .AddButton(new ToastButton()
+                        .SetContent("Что нового?")
+                        .AddArgument("action", "whats-new"))
+                    .Show();
+            }
+            catch (Exception error)
+            {
+                MessageBox.Show(
+                    "Доступна " + release.TagName +
+                    ", но Windows не показала уведомление: " + error.Message,
+                    "Обновление bm-blocked",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+        }
+
+        private void HandleUpdateAction(string action)
+        {
+            SafeBeginInvoke(delegate
+            {
+                if (String.Equals(action, "install", StringComparison.OrdinalIgnoreCase))
+                {
+                    InstallAvailableUpdate();
+                }
+                else if (String.Equals(action, "later", StringComparison.OrdinalIgnoreCase))
+                {
+                    DeferAvailableUpdate();
+                }
+                else if (String.Equals(action, "whats-new", StringComparison.OrdinalIgnoreCase))
+                {
+                    ShowReleaseNotes();
+                }
+            });
+        }
+
+        private void InstallAvailableUpdate()
+        {
+            if (exiting || Interlocked.CompareExchange(ref updateDownloadRunning, 1, 0) != 0)
             {
                 return;
             }
 
-            BeginApplyUpdate();
+            if (pendingUpdate != null)
+            {
+                Interlocked.Exchange(ref updateDownloadRunning, 0);
+                BeginApplyUpdate();
+                return;
+            }
+
+            var release = availableRelease;
+
+            if (release == null)
+            {
+                Interlocked.Exchange(ref updateDownloadRunning, 0);
+                CheckForUpdates(true);
+                return;
+            }
+
+            RemoveUpdateToast();
+            PublishUpdateState(release, false);
+            checkUpdatesItem.Enabled = false;
+            checkUpdatesItem.Text = "Скачиваю " + release.TagName + "...";
+            installUpdateItem.Enabled = false;
+            installUpdateItem.Text = "Скачивание...";
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    var prepared = UpdateClient.PrepareUpdate(release);
+
+                    SafeBeginInvoke(delegate
+                    {
+                        pendingUpdate = prepared;
+                        Interlocked.Exchange(ref updateDownloadRunning, 0);
+                        BeginApplyUpdate();
+                    });
+                }
+                catch (Exception error)
+                {
+                    SafeBeginInvoke(delegate
+                    {
+                        Interlocked.Exchange(ref updateDownloadRunning, 0);
+                        checkUpdatesItem.Enabled = true;
+                        checkUpdatesItem.Text = "Проверить обновления";
+                        installUpdateItem.Enabled = true;
+                        installUpdateItem.Text = "Установить " + release.TagName;
+                        MessageBox.Show(
+                            "Не удалось скачать обновление: " + error.Message,
+                            "Обновление bm-blocked",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                    });
+                }
+            });
+        }
+
+        private void DeferAvailableUpdate()
+        {
+            if (availableRelease == null)
+            {
+                return;
+            }
+
+            deferredReleaseTag = availableRelease.TagName;
+            deferredUntilUtc = DateTime.UtcNow.AddHours(6);
+            RemoveUpdateToast();
+            PublishUpdateState(availableRelease, false);
+        }
+
+        private void ShowReleaseNotes()
+        {
+            if (availableRelease == null)
+            {
+                CheckForUpdates(true);
+                return;
+            }
+
+            RemoveUpdateToast();
+            PublishUpdateState(availableRelease, true);
+        }
+
+        private void PublishUpdateState(ReleaseInfo release, bool showReleaseNotes)
+        {
+            var payload = release == null
+                ? new Dictionary<string, object>
+                {
+                    { "action", "clear" }
+                }
+                : new Dictionary<string, object>
+                {
+                    { "action", "available" },
+                    { "tag", release.TagName },
+                    { "name", release.Name },
+                    { "notes", release.Notes },
+                    { "showReleaseNotes", showReleaseNotes }
+                };
+            var json = new JavaScriptSerializer().Serialize(payload);
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    var request = (HttpWebRequest)WebRequest.Create(
+                        "http://127.0.0.1:8124/api/internal/update-state");
+                    var body = Encoding.UTF8.GetBytes(json);
+                    request.Method = "POST";
+                    request.ContentType = "application/json; charset=utf-8";
+                    request.ContentLength = body.Length;
+                    request.Timeout = 2000;
+                    request.Headers["X-Bm-Blocked-Internal-Token"] = internalToken;
+
+                    using (var stream = request.GetRequestStream())
+                    {
+                        stream.Write(body, 0, body.Length);
+                    }
+
+                    using (var response = (HttpWebResponse)request.GetResponse())
+                    {
+                    }
+                }
+                catch
+                {
+                }
+            });
+        }
+
+        private static void RemoveUpdateToast()
+        {
+            try
+            {
+                ToastNotificationManagerCompat.History.Clear();
+            }
+            catch
+            {
+            }
         }
 
         private void BeginApplyUpdate()
         {
             try
             {
-                var updaterPath = Path.Combine(
+                var updaterDirectory = Path.Combine(
                     Path.GetTempPath(),
-                    "bm-blocked-updater-" + Guid.NewGuid().ToString("N") + ".exe");
+                    "bm-blocked-updater-" + Guid.NewGuid().ToString("N"));
+                var updaterPath = Path.Combine(updaterDirectory, "bm-blocked.exe");
                 var targetDirectory = AppDomain.CurrentDomain.BaseDirectory;
                 var arguments = "--apply-update " +
                     Program.QuoteArgument(pendingUpdate.StagingDirectory) + " " +
                     Program.QuoteArgument(targetDirectory) + " " +
                     Process.GetCurrentProcess().Id;
 
+                Directory.CreateDirectory(updaterDirectory);
                 File.Copy(Application.ExecutablePath, updaterPath, true);
+                File.Copy(
+                    Path.Combine(targetDirectory, "Microsoft.Toolkit.Uwp.Notifications.dll"),
+                    Path.Combine(updaterDirectory, "Microsoft.Toolkit.Uwp.Notifications.dll"),
+                    true);
+                File.Copy(
+                    Path.Combine(targetDirectory, "System.ValueTuple.dll"),
+                    Path.Combine(updaterDirectory, "System.ValueTuple.dll"),
+                    true);
                 StopServer();
 
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = updaterPath,
                     Arguments = arguments,
-                    WorkingDirectory = Path.GetTempPath(),
+                    WorkingDirectory = updaterDirectory,
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden
@@ -789,6 +1106,8 @@ namespace BmBlocked
                 serverProcess.StartInfo.EnvironmentVariables["BM_BLOCKED_NO_BROWSER"] = "1";
                 serverProcess.StartInfo.EnvironmentVariables["BM_BLOCKED_NOTIFICATION_PIPE"] =
                     notificationPipeName;
+                serverProcess.StartInfo.EnvironmentVariables["BM_BLOCKED_INTERNAL_TOKEN"] =
+                    internalToken;
                 serverProcess.Start();
                 WaitForServer();
             }
@@ -806,6 +1125,7 @@ namespace BmBlocked
         {
             StopServer();
             StartServer();
+            PublishUpdateState(availableRelease, false);
             OpenService();
         }
 
@@ -910,11 +1230,23 @@ namespace BmBlocked
 
                         var payload = new JavaScriptSerializer().DeserializeObject(json)
                             as Dictionary<string, object>;
+                        var type = payload == null
+                            ? ""
+                            : Convert.ToString(payload.ContainsKey("type") ? payload["type"] : "");
+                        var action = payload == null
+                            ? ""
+                            : Convert.ToString(payload.ContainsKey("action") ? payload["action"] : "");
                         var message = payload == null
                             ? ""
                             : Convert.ToString(payload.ContainsKey("message") ? payload["message"] : "");
 
-                        if (!String.IsNullOrWhiteSpace(message))
+                        if (
+                            String.Equals(type, "update-action", StringComparison.OrdinalIgnoreCase) &&
+                            !String.IsNullOrWhiteSpace(action))
+                        {
+                            HandleUpdateAction(action);
+                        }
+                        else if (!String.IsNullOrWhiteSpace(message))
                         {
                             var safeMessage = message.Length > 500 ? message.Substring(0, 500) : message;
                             SafeBeginInvoke(delegate
@@ -987,6 +1319,7 @@ namespace BmBlocked
             }
 
             exiting = true;
+            Program.SetToastActionHandler(null);
             updateTimer.Dispose();
             StopNotificationListener();
 
@@ -1005,6 +1338,7 @@ namespace BmBlocked
         {
             if (disposing && !exiting)
             {
+                Program.SetToastActionHandler(null);
                 updateTimer.Dispose();
                 StopNotificationListener();
                 trayIcon.Dispose();

@@ -11,6 +11,7 @@ const isPortableExecutable = isSea();
 const shutdownToken = process.env.BM_BLOCKED_SHUTDOWN_TOKEN || "";
 const parentProcessId = Number(process.env.BM_BLOCKED_PARENT_PID) || 0;
 const notificationPipeName = process.env.BM_BLOCKED_NOTIFICATION_PIPE || "";
+const internalToken = process.env.BM_BLOCKED_INTERNAL_TOKEN || "";
 const root = isPortableExecutable
   ? path.dirname(process.execPath)
   : path.dirname(fileURLToPath(import.meta.url));
@@ -27,6 +28,14 @@ const authSessionDurationSeconds = 12 * 60 * 60;
 const authLoginWindowMs = 15 * 60 * 1000;
 const authMaxLoginAttempts = 5;
 const authLoginAttempts = new Map();
+let updateState = {
+  available: false,
+  tag: "",
+  name: "",
+  notes: "",
+  showReleaseNotes: false,
+  revision: 0,
+};
 const authRuntimeSessionSecret = crypto.randomBytes(32);
 const authConfig = await loadAuthConfig();
 const checkedWebsiteZones = new Set([
@@ -1222,7 +1231,7 @@ async function handleCheckPlacementsApi(req, res) {
   }
 }
 
-async function sendDesktopNotification(message) {
+async function sendTrayMessage(payload) {
   if (process.platform !== "win32" || !notificationPipeName) {
     return false;
   }
@@ -1244,11 +1253,15 @@ async function sendDesktopNotification(message) {
 
     socket.setTimeout(1500);
     socket.once("connect", () => {
-      socket.end(`${JSON.stringify({ message })}\n`, () => finish(true));
+      socket.end(`${JSON.stringify(payload)}\n`, () => finish(true));
     });
     socket.once("error", () => finish(false));
     socket.once("timeout", () => finish(false));
   });
+}
+
+async function sendDesktopNotification(message) {
+  return sendTrayMessage({ type: "check-completion", message });
 }
 
 async function handleDesktopNotificationApi(req, res) {
@@ -1271,6 +1284,69 @@ async function handleDesktopNotificationApi(req, res) {
 
     const delivered = await sendDesktopNotification(message);
     sendJson(res, 200, { delivered });
+  } catch (error) {
+    sendJson(res, error.statusCode || 500, { error: error.message });
+  }
+}
+
+async function handleInternalUpdateStateApi(req, res) {
+  try {
+    const payload = await readJson(req);
+
+    if (payload.action === "clear") {
+      updateState = {
+        available: false,
+        tag: "",
+        name: "",
+        notes: "",
+        showReleaseNotes: false,
+        revision: updateState.revision + 1,
+      };
+    } else if (payload.action === "available") {
+      updateState = {
+        available: true,
+        tag: String(payload.tag || "").trim().slice(0, 64),
+        name: String(payload.name || payload.tag || "").trim().slice(0, 200),
+        notes: String(payload.notes || "").slice(0, 100000),
+        showReleaseNotes: payload.showReleaseNotes === true,
+        revision: updateState.revision + 1,
+      };
+    } else {
+      throw new InputError("Неизвестное действие внутреннего API обновлений.");
+    }
+
+    sendJson(res, 200, { updated: true });
+  } catch (error) {
+    sendJson(res, error.statusCode || 500, { error: error.message });
+  }
+}
+
+function handleUpdateStatusApi(req, res) {
+  sendJson(res, 200, updateState);
+}
+
+async function handleUpdateActionApi(req, res) {
+  try {
+    const payload = await readJson(req);
+    const action = String(payload.action || "").trim().toLowerCase();
+
+    if (action !== "install" && action !== "later") {
+      throw new InputError("Неизвестное действие обновления.");
+    }
+
+    const delivered = await sendTrayMessage({ type: "update-action", action });
+
+    if (!delivered) {
+      sendJson(res, 503, { error: "bm-blocked.exe не принял команду обновления." });
+      return;
+    }
+
+    updateState = {
+      ...updateState,
+      showReleaseNotes: false,
+      revision: updateState.revision + 1,
+    };
+    sendJson(res, 200, { delivered: true });
   } catch (error) {
     sendJson(res, error.statusCode || 500, { error: error.message });
   }
@@ -1369,6 +1445,19 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "POST" && requestUrl.pathname === "/api/internal/update-state") {
+    if (
+      !internalToken ||
+      req.headers["x-bm-blocked-internal-token"] !== internalToken
+    ) {
+      sendJson(res, 403, { error: "Forbidden" });
+      return;
+    }
+
+    handleInternalUpdateStateApi(req, res);
+    return;
+  }
+
   if (requestUrl.pathname.startsWith("/api/") && !readSession(req)) {
     sendJson(res, 401, { error: "Требуется вход в bm-blocked." });
     return;
@@ -1391,6 +1480,16 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "POST" && requestUrl.pathname === "/api/desktop-notification") {
     handleDesktopNotificationApi(req, res);
+    return;
+  }
+
+  if (req.method === "GET" && requestUrl.pathname === "/api/update-status") {
+    handleUpdateStatusApi(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/update-action") {
+    handleUpdateActionApi(req, res);
     return;
   }
 
