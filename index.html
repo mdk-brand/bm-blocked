@@ -980,35 +980,14 @@
         return response;
       }
 
-      async function requestCheckNotificationPermission() {
-        if (!("Notification" in window) || Notification.permission !== "default") {
-          return;
-        }
-
-        try {
-          await Notification.requestPermission();
-        } catch (error) {
-        }
-      }
-
-      function notifyCheckCompletion(message) {
+      function notifyCheckCompletion(kind, details = {}) {
         const pageIsActive = document.visibilityState === "visible" && document.hasFocus();
 
-        if (
-          pageIsActive ||
-          !("Notification" in window) ||
-          Notification.permission !== "granted"
-        ) {
+        if (pageIsActive) {
           return;
         }
 
-        try {
-          new Notification("bm-blocked", {
-            body: message,
-            tag: "bm-blocked-check-complete",
-          });
-        } catch (error) {
-        }
+        postJson("/api/desktop-notification", { kind, ...details }).catch(() => {});
       }
 
       function resetReport() {
@@ -1414,7 +1393,6 @@
 
         const campaignIds = Array.from(checkedCampaignIds);
 
-        await requestCheckNotificationPermission();
         setStatus("Проверяю web-площадки выбранных кампаний. App-площадки будут пропущены...");
         setBusy(checkReportButton, true, "Проверка...");
         loadReportButton.disabled = true;
@@ -1440,12 +1418,12 @@
             `Проверка завершена. Проверено кампаний: ${payload.totalCampaigns || 0}.`,
             "success",
           );
-          notifyCheckCompletion(
-            `Проверка завершена. Проверено кампаний: ${payload.totalCampaigns || 0}.`,
-          );
+          notifyCheckCompletion("success", {
+            campaignCount: payload.totalCampaigns || 0,
+          });
         } catch (error) {
           setStatus(error.message, "error");
-          notifyCheckCompletion(`Проверка завершилась ошибкой: ${error.message}`);
+          notifyCheckCompletion("error", { error: error.message });
         } finally {
           setBusy(checkReportButton, false, "Проверить актуальность");
           updateCheckButtonState();

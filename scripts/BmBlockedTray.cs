@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.IO.Compression;
+using System.IO.Pipes;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -16,8 +17,8 @@ using System.Windows.Forms;
 [assembly: System.Reflection.AssemblyDescription("Проверка заблокированных площадок Яндекс Директа")]
 [assembly: System.Reflection.AssemblyCompany("Brandmaker")]
 [assembly: System.Reflection.AssemblyProduct("bm-blocked")]
-[assembly: System.Reflection.AssemblyVersion("1.0.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.1.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.2.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.2.0")]
 
 namespace BmBlocked
 {
@@ -513,6 +514,8 @@ namespace BmBlocked
     internal sealed class TrayAppContext : ApplicationContext
     {
         private const string Url = "http://127.0.0.1:8124/index.html";
+        private readonly string notificationPipeName =
+            "bm-blocked-notifications-" + Process.GetCurrentProcess().Id;
         private readonly NotifyIcon trayIcon;
         private readonly ToolStripMenuItem checkUpdatesItem;
         private readonly ToolStripMenuItem installUpdateItem;
@@ -520,9 +523,14 @@ namespace BmBlocked
         private readonly bool suppressBrowser =
             Environment.GetEnvironmentVariable("BM_BLOCKED_LAUNCHER_NO_BROWSER") == "1";
         private readonly System.Threading.Timer updateTimer;
+        private readonly Thread notificationThread;
+        private readonly object notificationPipeLock = new object();
+        private NamedPipeServerStream activeNotificationPipe;
+        private Action balloonClickAction;
         private Process serverProcess;
         private PreparedUpdate pendingUpdate;
         private int updateCheckRunning;
+        private volatile bool notificationListenerStopping;
         private bool exiting;
 
         internal TrayAppContext()
@@ -545,7 +553,22 @@ namespace BmBlocked
                 ContextMenuStrip = BuildMenu()
             };
             trayIcon.DoubleClick += delegate { OpenService(); };
-            trayIcon.BalloonTipClicked += delegate { ConfirmAndApplyUpdate(); };
+            trayIcon.BalloonTipClicked += delegate
+            {
+                var action = balloonClickAction;
+                balloonClickAction = null;
+                if (action != null)
+                {
+                    action();
+                }
+            };
+
+            notificationThread = new Thread(ListenForNotifications)
+            {
+                IsBackground = true,
+                Name = "bm-blocked notifications"
+            };
+            notificationThread.Start();
 
             StartServer();
 
@@ -637,7 +660,8 @@ namespace BmBlocked
                         installUpdateItem.Text = "Установить " + release.TagName;
                         ShowBalloon(
                             "Обновление готово",
-                            release.TagName + " скачано и проверено. Нажмите уведомление для установки.");
+                            release.TagName + " скачано и проверено. Нажмите уведомление для установки.",
+                            ConfirmAndApplyUpdate);
                     });
                 }
                 catch (Exception error)
@@ -763,6 +787,8 @@ namespace BmBlocked
                 };
 
                 serverProcess.StartInfo.EnvironmentVariables["BM_BLOCKED_NO_BROWSER"] = "1";
+                serverProcess.StartInfo.EnvironmentVariables["BM_BLOCKED_NOTIFICATION_PIPE"] =
+                    notificationPipeName;
                 serverProcess.Start();
                 WaitForServer();
             }
@@ -851,8 +877,88 @@ namespace BmBlocked
             }
         }
 
-        private void ShowBalloon(string title, string text)
+        private void ListenForNotifications()
         {
+            while (!notificationListenerStopping)
+            {
+                try
+                {
+                    using (var pipe = new NamedPipeServerStream(
+                        notificationPipeName,
+                        PipeDirection.In,
+                        1,
+                        PipeTransmissionMode.Byte,
+                        PipeOptions.None))
+                    {
+                        lock (notificationPipeLock)
+                        {
+                            activeNotificationPipe = pipe;
+                        }
+
+                        pipe.WaitForConnection();
+
+                        if (notificationListenerStopping)
+                        {
+                            return;
+                        }
+
+                        string json;
+                        using (var reader = new StreamReader(pipe, Encoding.UTF8))
+                        {
+                            json = reader.ReadToEnd();
+                        }
+
+                        var payload = new JavaScriptSerializer().DeserializeObject(json)
+                            as Dictionary<string, object>;
+                        var message = payload == null
+                            ? ""
+                            : Convert.ToString(payload.ContainsKey("message") ? payload["message"] : "");
+
+                        if (!String.IsNullOrWhiteSpace(message))
+                        {
+                            var safeMessage = message.Length > 500 ? message.Substring(0, 500) : message;
+                            SafeBeginInvoke(delegate
+                            {
+                                ShowBalloon("bm-blocked", safeMessage, OpenService);
+                            });
+                        }
+                    }
+                }
+                catch
+                {
+                    if (!notificationListenerStopping)
+                    {
+                        Thread.Sleep(200);
+                    }
+                }
+                finally
+                {
+                    lock (notificationPipeLock)
+                    {
+                        activeNotificationPipe = null;
+                    }
+                }
+            }
+        }
+
+        private void StopNotificationListener()
+        {
+            notificationListenerStopping = true;
+
+            lock (notificationPipeLock)
+            {
+                if (activeNotificationPipe != null)
+                {
+                    try { activeNotificationPipe.Dispose(); } catch { }
+                }
+            }
+
+            try { notificationThread.Join(1000); } catch { }
+        }
+
+        private void ShowBalloon(string title, string text, Action clickAction = null)
+        {
+            balloonClickAction = clickAction;
             trayIcon.BalloonTipTitle = title;
             trayIcon.BalloonTipText = text;
             trayIcon.ShowBalloonTip(5000);
@@ -882,6 +988,7 @@ namespace BmBlocked
 
             exiting = true;
             updateTimer.Dispose();
+            StopNotificationListener();
 
             if (stopServer)
             {
@@ -899,6 +1006,7 @@ namespace BmBlocked
             if (disposing && !exiting)
             {
                 updateTimer.Dispose();
+                StopNotificationListener();
                 trayIcon.Dispose();
                 dispatcher.Dispose();
                 StopServer();

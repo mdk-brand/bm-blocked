@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 const isPortableExecutable = isSea();
 const shutdownToken = process.env.BM_BLOCKED_SHUTDOWN_TOKEN || "";
 const parentProcessId = Number(process.env.BM_BLOCKED_PARENT_PID) || 0;
+const notificationPipeName = process.env.BM_BLOCKED_NOTIFICATION_PIPE || "";
 const root = isPortableExecutable
   ? path.dirname(process.execPath)
   : path.dirname(fileURLToPath(import.meta.url));
@@ -1221,6 +1222,60 @@ async function handleCheckPlacementsApi(req, res) {
   }
 }
 
+async function sendDesktopNotification(message) {
+  if (process.platform !== "win32" || !notificationPipeName) {
+    return false;
+  }
+
+  const pipePath = `\\\\.\\pipe\\${notificationPipeName}`;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const socket = net.createConnection(pipePath);
+    const finish = (delivered) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      socket.destroy();
+      resolve(delivered);
+    };
+
+    socket.setTimeout(1500);
+    socket.once("connect", () => {
+      socket.end(`${JSON.stringify({ message })}\n`, () => finish(true));
+    });
+    socket.once("error", () => finish(false));
+    socket.once("timeout", () => finish(false));
+  });
+}
+
+async function handleDesktopNotificationApi(req, res) {
+  try {
+    const payload = await readJson(req);
+    let message;
+
+    if (payload.kind === "success") {
+      const campaignCount = Math.max(0, Math.trunc(Number(payload.campaignCount) || 0));
+      message = `Проверка завершена. Проверено кампаний: ${campaignCount}.`;
+    } else if (payload.kind === "error") {
+      const errorMessage = String(payload.error || "неизвестная ошибка")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 300);
+      message = `Проверка завершилась ошибкой: ${errorMessage}`;
+    } else {
+      throw new InputError("Неизвестный тип системного уведомления.");
+    }
+
+    const delivered = await sendDesktopNotification(message);
+    sendJson(res, 200, { delivered });
+  } catch (error) {
+    sendJson(res, error.statusCode || 500, { error: error.message });
+  }
+}
+
 async function handleClearPlacementsApi(req, res) {
   try {
     const payload = await readJson(req);
@@ -1331,6 +1386,11 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "POST" && requestUrl.pathname === "/api/check-placements") {
     handleCheckPlacementsApi(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/desktop-notification") {
+    handleDesktopNotificationApi(req, res);
     return;
   }
 
