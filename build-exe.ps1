@@ -7,6 +7,7 @@ $source = Join-Path $root "scripts\BmBlockedTray.cs"
 $compiler = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 $authConfig = Join-Path $root "auth-config.json"
 $archive = Join-Path $root "bm-blocked.zip"
+$checksum = Join-Path $root "bm-blocked.zip.sha256"
 $systemNodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue | Select-Object -First 1
 $systemNode = if ($systemNodeCommand) { $systemNodeCommand.Source } else { $null }
 $codexNode = Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA "OpenAI\Codex\runtimes") -Recurse -Filter node.exe -ErrorAction SilentlyContinue |
@@ -49,6 +50,9 @@ $exePath = Join-Path $dist "bm-blocked.exe"
   /out:$exePath `
   /reference:System.dll `
   /reference:System.Drawing.dll `
+  /reference:System.IO.Compression.dll `
+  /reference:System.IO.Compression.FileSystem.dll `
+  /reference:System.Web.Extensions.dll `
   /reference:System.Windows.Forms.dll `
   $source
 
@@ -66,7 +70,15 @@ if (Test-Path $archive) {
   Remove-Item -LiteralPath $archive -Force
 }
 
+if (Test-Path $checksum) {
+  Remove-Item -LiteralPath $checksum -Force
+}
+
 Compress-Archive -Path (Join-Path $dist "*") -DestinationPath $archive -CompressionLevel Optimal
+$archiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+$checksumLine = "$archiveHash  bm-blocked.zip`r`n"
+[IO.File]::WriteAllText($checksum, $checksumLine, [Text.Encoding]::ASCII)
 
 Write-Host "Done: $exePath"
 Write-Host "Archive: $archive"
+Write-Host "Checksum: $checksum"

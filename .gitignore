@@ -3,4 +3,5 @@ node_modules/
 build/
 dist/
 *.zip
+*.zip.sha256
 auth-config.json

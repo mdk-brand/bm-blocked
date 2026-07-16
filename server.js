@@ -587,7 +587,7 @@ function looksLikeMobileAppHostname(value) {
     return true;
   }
 
-  return packageLabels.length >= 6 &&
+  return packageLabels.length >= 5 &&
     packageLabels.every((label) => /^[a-z][a-z0-9_]*$/.test(label));
 }
 
