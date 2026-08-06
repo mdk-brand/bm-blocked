@@ -18,14 +18,17 @@ using Microsoft.Toolkit.Uwp.Notifications;
 [assembly: System.Reflection.AssemblyDescription("Проверка заблокированных площадок Яндекс Директа")]
 [assembly: System.Reflection.AssemblyCompany("Brandmaker")]
 [assembly: System.Reflection.AssemblyProduct("bm-blocked")]
-[assembly: System.Reflection.AssemblyVersion("1.0.4.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.4.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.5.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.5.0")]
 
 namespace BmBlocked
 {
     internal static class Program
     {
         private const string SingleInstanceMutexName = @"Local\BmBlockedSingleInstance";
+        internal const string UpdateStagingVariable = "BM_BLOCKED_UPDATE_STAGING";
+        internal const string UpdateTargetVariable = "BM_BLOCKED_UPDATE_TARGET";
+        internal const string UpdateParentVariable = "BM_BLOCKED_UPDATE_PARENT";
         private static readonly object ToastActionSync = new object();
         private static Action<string> toastActionHandler;
         private static string pendingToastAction;
@@ -33,11 +36,32 @@ namespace BmBlocked
         [STAThread]
         private static void Main(string[] args)
         {
-            if (args.Length >= 4 && args[0] == "--apply-update")
+            if (args.Length >= 1 && args[0] == "--apply-update")
             {
+                var stagingDirectory = args.Length >= 4
+                    ? args[1]
+                    : Environment.GetEnvironmentVariable(UpdateStagingVariable);
+                var targetDirectory = args.Length >= 4
+                    ? args[2]
+                    : Environment.GetEnvironmentVariable(UpdateTargetVariable);
+                var parentProcessValue = args.Length >= 4
+                    ? args[3]
+                    : Environment.GetEnvironmentVariable(UpdateParentVariable);
                 int parentProcessId;
-                int.TryParse(args[3], out parentProcessId);
-                UpdateApplier.Apply(args[1], args[2], parentProcessId);
+                int.TryParse(parentProcessValue, out parentProcessId);
+
+                if (String.IsNullOrWhiteSpace(stagingDirectory) ||
+                    String.IsNullOrWhiteSpace(targetDirectory))
+                {
+                    MessageBox.Show(
+                        "Не удалось определить папки для установки обновления.",
+                        "bm-blocked",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    return;
+                }
+
+                UpdateApplier.Apply(stagingDirectory, targetDirectory, parentProcessId);
                 return;
             }
 
@@ -61,11 +85,6 @@ namespace BmBlocked
                 Application.Run(new TrayAppContext());
                 GC.KeepAlive(mutex);
             }
-        }
-
-        internal static string QuoteArgument(string value)
-        {
-            return "\"" + (value ?? "").Replace("\"", "\\\"") + "\"";
         }
 
         internal static void SetToastActionHandler(Action<string> handler)
@@ -1032,10 +1051,6 @@ namespace BmBlocked
                     "bm-blocked-updater-" + Guid.NewGuid().ToString("N"));
                 var updaterPath = Path.Combine(updaterDirectory, "bm-blocked.exe");
                 var targetDirectory = AppDomain.CurrentDomain.BaseDirectory;
-                var arguments = "--apply-update " +
-                    Program.QuoteArgument(pendingUpdate.StagingDirectory) + " " +
-                    Program.QuoteArgument(targetDirectory) + " " +
-                    Process.GetCurrentProcess().Id;
 
                 Directory.CreateDirectory(updaterDirectory);
                 File.Copy(Application.ExecutablePath, updaterPath, true);
@@ -1049,15 +1064,21 @@ namespace BmBlocked
                     true);
                 StopServer();
 
-                Process.Start(new ProcessStartInfo
+                var startInfo = new ProcessStartInfo
                 {
                     FileName = updaterPath,
-                    Arguments = arguments,
+                    Arguments = "--apply-update",
                     WorkingDirectory = updaterDirectory,
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden
-                });
+                };
+                startInfo.EnvironmentVariables[Program.UpdateStagingVariable] =
+                    pendingUpdate.StagingDirectory;
+                startInfo.EnvironmentVariables[Program.UpdateTargetVariable] = targetDirectory;
+                startInfo.EnvironmentVariables[Program.UpdateParentVariable] =
+                    Process.GetCurrentProcess().Id.ToString();
+                Process.Start(startInfo);
 
                 ExitApplication(false);
             }
