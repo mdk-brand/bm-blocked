@@ -19,9 +19,12 @@ const port = 8124;
 const host = "127.0.0.1";
 const directApiBaseUrl = "https://api.direct.yandex.com/json/v5";
 const directApiUnifiedBaseUrl = "https://api.direct.yandex.com/json/v501";
+const directReportsUrl = `${directApiUnifiedBaseUrl}/reports`;
 const pageLimit = 10000;
 const siteCheckConcurrency = 8;
 const siteCheckTimeoutMs = 8000;
+const channelCostThreshold = 50;
+const reportWaitTimeoutMs = 10 * 60 * 1000;
 const authConfigPath = path.join(root, "auth-config.json");
 const authCookieName = "bm_blocked_session";
 const authSessionDurationSeconds = 12 * 60 * 60;
@@ -298,28 +301,23 @@ async function handleAuthLoginApi(req, res) {
 
   try {
     const payload = await readJson(req);
-    const username = String(payload.username || "").trim();
     const password = String(payload.password || "");
-    const [derivedUsernameHash, derivedPasswordHash] = await Promise.all([
-      deriveCredentialHash(username, authConfig.username),
-      deriveCredentialHash(password, authConfig.password),
-    ]);
-    const usernameMatches = crypto.timingSafeEqual(
-      derivedUsernameHash,
-      authConfig.username.hash,
+    const derivedPasswordHash = await deriveCredentialHash(
+      password,
+      authConfig.password,
     );
     const passwordMatches = crypto.timingSafeEqual(
       derivedPasswordHash,
       authConfig.password.hash,
     );
 
-    if (!usernameMatches || !passwordMatches) {
+    if (!passwordMatches) {
       const attempt = registerFailedLogin(req);
       const isBlocked = attempt.count >= authMaxLoginAttempts;
       sendJson(res, isBlocked ? 429 : 401, {
         error: isBlocked
           ? "Слишком много попыток входа. Попробуйте через 15 минут."
-          : "Неверный логин или пароль.",
+          : "Неверный пароль.",
       });
       return;
     }
@@ -573,6 +571,287 @@ async function loadBlockedPlacementsReport(token, clientLogin) {
       };
     })
     .sort((left, right) => right.blockedCount - left.blockedCount || left.campaignName.localeCompare(right.campaignName, "ru"));
+}
+
+function formatReportDate(date) {
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function getLast30DaysRange(now = new Date()) {
+  const moscowDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Moscow",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+  const dateTo = new Date(`${moscowDate}T00:00:00Z`);
+  const dateFrom = new Date(dateTo);
+  dateFrom.setUTCDate(dateFrom.getUTCDate() - 29);
+
+  return {
+    dateFrom: formatReportDate(dateFrom),
+    dateTo: formatReportDate(dateTo),
+  };
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function parseDirectReportError(responseText, fallback) {
+  try {
+    return parseDirectError(JSON.parse(responseText));
+  } catch (error) {
+    return responseText.trim().slice(0, 300) || fallback;
+  }
+}
+
+async function requestDirectReport(token, clientLogin, reportDefinition) {
+  const requestBody = JSON.stringify({ params: reportDefinition });
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < reportWaitTimeoutMs) {
+    let response;
+
+    try {
+      response = await fetch(directReportsUrl, {
+        method: "POST",
+        headers: {
+          ...directHeaders(token, clientLogin),
+          processingMode: "auto",
+          returnMoneyInMicros: "false",
+          skipReportHeader: "true",
+          skipColumnHeader: "true",
+          skipReportSummary: "true",
+        },
+        body: requestBody,
+      });
+    } catch (error) {
+      const technicalReason = [error.message, error.cause?.code]
+        .filter(Boolean)
+        .join(", ");
+      throw new Error(
+        `Не удалось получить отчет Яндекс Директа. Технически: ${technicalReason}`,
+      );
+    }
+
+    const responseText = await response.text();
+
+    if (response.status === 200) {
+      return responseText;
+    }
+
+    if (response.status === 201 || response.status === 202) {
+      const retryInSeconds = Math.min(
+        30,
+        Math.max(1, Number(response.headers.get("retryIn")) || 2),
+      );
+      await wait(retryInSeconds * 1000);
+      continue;
+    }
+
+    throw new Error(
+      parseDirectReportError(
+        responseText,
+        `Отчет Яндекс Директа завершился с HTTP ${response.status}.`,
+      ),
+    );
+  }
+
+  throw new Error("Яндекс Директ не сформировал отчет за 10 минут.");
+}
+
+function parseTsvRow(line) {
+  const values = [];
+  let value = "";
+  let quoted = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+
+    if (character === '"') {
+      if (quoted && line[index + 1] === '"') {
+        value += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === "\t" && !quoted) {
+      values.push(value);
+      value = "";
+    } else {
+      value += character;
+    }
+  }
+
+  values.push(value);
+  return values;
+}
+
+function normalizeChannelPlacement(value) {
+  const rawValue = normalizePlacementValue(value);
+
+  if (!rawValue || /\s/.test(rawValue)) {
+    return null;
+  }
+
+  if (!/^(?:t\.me|max\.ru|web\.max\.ru|vk\.com|rutube\.ru)\//i.test(rawValue)) {
+    return null;
+  }
+
+  try {
+    const url = new URL(`https://${rawValue}`);
+    const hostname = url.hostname.toLowerCase();
+    const supportedHosts = new Set([
+      "t.me",
+      "max.ru",
+      "web.max.ru",
+      "vk.com",
+      "rutube.ru",
+    ]);
+    const pathname = url.pathname.replace(/\/+$/, "");
+
+    if (!supportedHosts.has(hostname) || !pathname || pathname === "/") {
+      return null;
+    }
+
+    const placement = `${hostname}${pathname}`;
+
+    return {
+      key: placement.toLowerCase(),
+      placement,
+      url: `https://${placement}`,
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function parseChannelPerformanceReport(reportText, campaigns = []) {
+  const campaignIds = new Set(campaigns.map((campaign) => campaign.campaignId));
+  const channelsByCampaign = new Map(
+    campaigns.map((campaign) => [campaign.campaignId, new Map()]),
+  );
+
+  for (const line of String(reportText || "").split(/\r?\n/)) {
+    if (!line.trim()) {
+      continue;
+    }
+
+    const [campaignIdValue, placementValue, costValue] = parseTsvRow(line);
+    const campaignId = String(campaignIdValue || "").trim();
+    const channel = normalizeChannelPlacement(placementValue);
+    const cost = Number(String(costValue || "").replace(/\s/g, "").replace(",", "."));
+
+    if (!campaignIds.has(campaignId) || !channel || !Number.isFinite(cost)) {
+      continue;
+    }
+
+    const campaignChannels = channelsByCampaign.get(campaignId);
+    const existing = campaignChannels.get(channel.key);
+
+    if (existing) {
+      existing.cost += cost;
+    } else {
+      campaignChannels.set(channel.key, { ...channel, cost });
+    }
+  }
+
+  return new Map(
+    campaigns.map((campaign) => {
+      const blockedChannelKeys = new Set(
+        campaign.blockedSites
+          .map((placement) => normalizeChannelPlacement(placement)?.key)
+          .filter(Boolean),
+      );
+      const channels = Array.from(channelsByCampaign.get(campaign.campaignId).values())
+        .filter(
+          (channel) =>
+            channel.cost > channelCostThreshold &&
+            !blockedChannelKeys.has(channel.key),
+        )
+        .map((channel) => ({
+          ...channel,
+          cost: Math.round(channel.cost * 100) / 100,
+        }))
+        .sort((left, right) =>
+          right.cost - left.cost || left.placement.localeCompare(right.placement, "ru"),
+        );
+
+      return [campaign.campaignId, channels];
+    }),
+  );
+}
+
+function buildChannelReportDefinition(campaigns, dateFrom, dateTo) {
+  return {
+    SelectionCriteria: {
+      DateFrom: dateFrom,
+      DateTo: dateTo,
+      Filter: [
+        {
+          Field: "CampaignId",
+          Operator: "IN",
+          Values: campaigns.map((campaign) => campaign.campaignId),
+        },
+      ],
+    },
+    FieldNames: ["CampaignId", "Placement", "Cost"],
+    ReportName: `bm-blocked-channels-${Date.now()}`,
+    ReportType: "CUSTOM_REPORT",
+    DateRangeType: "CUSTOM_DATE",
+    Format: "TSV",
+    IncludeVAT: "NO",
+    IncludeDiscount: "YES",
+  };
+}
+
+async function checkCampaignChannels(token, clientLogin, campaignIds = []) {
+  const campaigns = await loadBlockedPlacementsReport(token, clientLogin);
+  const selectedCampaignIds = new Set(campaignIds.map((campaignId) => String(campaignId)));
+  const campaignsToCheck = campaigns.filter((campaign) =>
+    selectedCampaignIds.has(campaign.campaignId),
+  );
+
+  if (campaignsToCheck.length === 0) {
+    throw new InputError("Не выбраны активные кампании РСЯ для проверки каналов.");
+  }
+
+  const { dateFrom, dateTo } = getLast30DaysRange();
+  const reportText = await requestDirectReport(
+    token,
+    clientLogin,
+    buildChannelReportDefinition(campaignsToCheck, dateFrom, dateTo),
+  );
+  const channelsByCampaign = parseChannelPerformanceReport(
+    reportText,
+    campaignsToCheck,
+  );
+  const checkedCampaigns = campaignsToCheck.map((campaign) => {
+    const channels = channelsByCampaign.get(campaign.campaignId) || [];
+
+    return {
+      ...toPublicCampaign(campaign),
+      channels,
+      channelCount: channels.length,
+    };
+  });
+
+  return {
+    campaigns: checkedCampaigns,
+    totalCampaigns: checkedCampaigns.length,
+    totalChannels: checkedCampaigns.reduce(
+      (sum, campaign) => sum + campaign.channelCount,
+      0,
+    ),
+    dateFrom,
+    dateTo,
+    costThreshold: channelCostThreshold,
+  };
 }
 
 function looksLikeMobileAppHostname(value) {
@@ -1187,6 +1466,192 @@ async function clearUnavailablePlacements(token, clientLogin, selections = []) {
   };
 }
 
+function selectChannelsForAvailableSlots(channels, blockedCount) {
+  const availableSlots = Math.max(0, 1000 - blockedCount);
+  const sortedChannels = [...channels].sort((left, right) =>
+    right.cost - left.cost || left.placement.localeCompare(right.placement, "ru"),
+  );
+
+  return {
+    selected: sortedChannels.slice(0, availableSlots),
+    skipped: sortedChannels.slice(availableSlots),
+  };
+}
+
+async function blockChannelPlacements(token, clientLogin, selections = []) {
+  const campaigns = await loadBlockedPlacementsReport(token, clientLogin);
+  const campaignsById = new Map(
+    campaigns.map((campaign) => [campaign.campaignId, campaign]),
+  );
+  const updates = [];
+  const failedCampaigns = [];
+  const limitSkippedCampaigns = [];
+
+  for (const selection of selections) {
+    const campaignId = String(selection?.campaignId || "").trim();
+    const campaign = campaignsById.get(campaignId);
+
+    if (!campaign) {
+      failedCampaigns.push({
+        campaignId,
+        error: "Активная кампания РСЯ не найдена.",
+      });
+      continue;
+    }
+
+    const requestedChannelsByKey = new Map();
+
+    for (const requestedChannel of Array.isArray(selection?.channels)
+      ? selection.channels
+      : []) {
+      const channel = normalizeChannelPlacement(
+        requestedChannel?.placement || requestedChannel,
+      );
+      const cost = Number(requestedChannel?.cost);
+
+      if (!channel || !Number.isFinite(cost) || cost <= channelCostThreshold) {
+        continue;
+      }
+
+      const existing = requestedChannelsByKey.get(channel.key);
+
+      if (!existing || cost > existing.cost) {
+        requestedChannelsByKey.set(channel.key, { ...channel, cost });
+      }
+    }
+
+    const existingChannelKeys = new Set(
+      campaign.blockedSites
+        .map((placement) => normalizeChannelPlacement(placement)?.key)
+        .filter(Boolean),
+    );
+    const requestedChannels = Array.from(requestedChannelsByKey.values()).filter(
+      (channel) => !existingChannelKeys.has(channel.key),
+    );
+    const { selected, skipped } = selectChannelsForAvailableSlots(
+      requestedChannels,
+      campaign.blockedSites.length,
+    );
+    const addedChannels = selected.map((channel) => channel.placement);
+    const skippedChannels = skipped.map((channel) => channel.placement);
+
+    if (skippedChannels.length > 0) {
+      limitSkippedCampaigns.push({
+        campaignId,
+        blockedCount: campaign.blockedSites.length,
+        skippedChannels,
+        skippedCount: skippedChannels.length,
+      });
+    }
+
+    if (addedChannels.length === 0) {
+      continue;
+    }
+
+    const blockedSites = [...campaign.blockedSites, ...addedChannels];
+
+    updates.push({
+      campaignId,
+      campaignType: campaign.campaignType,
+      blockedSites,
+      addedChannels,
+      skippedChannels,
+    });
+  }
+
+  const updatedCampaigns = [];
+  const updateGroups = [
+    {
+      items: updates.filter((update) => update.campaignType === "TEXT_CAMPAIGN"),
+      apiBaseUrl: directApiBaseUrl,
+    },
+    {
+      items: updates.filter((update) => update.campaignType === "UNIFIED_CAMPAIGN"),
+      apiBaseUrl: directApiUnifiedBaseUrl,
+    },
+  ];
+
+  for (const group of updateGroups) {
+    for (const chunk of splitIntoChunks(group.items, 10)) {
+      let result;
+
+      try {
+        result = await directRequest(
+          token,
+          "campaigns",
+          {
+            method: "update",
+            params: {
+              Campaigns: chunk.map((update) => ({
+                Id: Number(update.campaignId),
+                ExcludedSites: {
+                  Items: update.blockedSites,
+                },
+              })),
+            },
+          },
+          {
+            clientLogin,
+            apiBaseUrl: group.apiBaseUrl,
+          },
+        );
+      } catch (error) {
+        failedCampaigns.push(
+          ...chunk.map((update) => ({
+            campaignId: update.campaignId,
+            error: error.message,
+          })),
+        );
+        continue;
+      }
+
+      const updateResults = result.UpdateResults || [];
+
+      chunk.forEach((update, index) => {
+        const updateResult = updateResults[index] || {};
+
+        if (Array.isArray(updateResult.Errors) && updateResult.Errors.length > 0) {
+          failedCampaigns.push({
+            campaignId: update.campaignId,
+            error: formatDirectNotifications(updateResult.Errors),
+          });
+          return;
+        }
+
+        if (!updateResult.Id) {
+          failedCampaigns.push({
+            campaignId: update.campaignId,
+            error: "Яндекс Директ не подтвердил изменение кампании.",
+          });
+          return;
+        }
+
+        updatedCampaigns.push({
+          campaignId: update.campaignId,
+          blockedCount: update.blockedSites.length,
+          blockedChannels: update.addedChannels,
+          skippedChannels: update.skippedChannels,
+          addedCount: update.addedChannels.length,
+        });
+      });
+    }
+  }
+
+  return {
+    updatedCampaigns,
+    failedCampaigns,
+    limitSkippedCampaigns,
+    totalBlocked: updatedCampaigns.reduce(
+      (sum, campaign) => sum + campaign.addedCount,
+      0,
+    ),
+    totalSkippedByLimit: limitSkippedCampaigns.reduce(
+      (sum, campaign) => sum + campaign.skippedCount,
+      0,
+    ),
+  };
+}
+
 async function handleDirectClientsApi(req, res) {
   try {
     const payload = await readJson(req);
@@ -1224,6 +1689,20 @@ async function handleCheckPlacementsApi(req, res) {
     const clientLogin = requireString(payload, "clientLogin", "клиент");
     const campaignIds = Array.isArray(payload.campaignIds) ? payload.campaignIds : [];
     const report = await checkBlockedPlacementsReport(token, clientLogin, campaignIds);
+
+    sendJson(res, 200, report);
+  } catch (error) {
+    sendJson(res, error.statusCode || 502, { error: error.message });
+  }
+}
+
+async function handleCheckChannelsApi(req, res) {
+  try {
+    const payload = await readJson(req);
+    const token = requireString(payload, "token", "OAuth-токен");
+    const clientLogin = requireString(payload, "clientLogin", "клиент");
+    const campaignIds = Array.isArray(payload.campaignIds) ? payload.campaignIds : [];
+    const report = await checkCampaignChannels(token, clientLogin, campaignIds);
 
     sendJson(res, 200, report);
   } catch (error) {
@@ -1271,7 +1750,9 @@ async function handleDesktopNotificationApi(req, res) {
 
     if (payload.kind === "success") {
       const campaignCount = Math.max(0, Math.trunc(Number(payload.campaignCount) || 0));
-      message = `Проверка завершена. Проверено кампаний: ${campaignCount}.`;
+      message = payload.checkType === "channels"
+        ? `Проверка каналов завершена. Проверено кампаний: ${campaignCount}.`
+        : `Проверка завершена. Проверено кампаний: ${campaignCount}.`;
     } else if (payload.kind === "error") {
       const errorMessage = String(payload.error || "неизвестная ошибка")
         .replace(/\s+/g, " ")
@@ -1364,6 +1845,29 @@ async function handleClearPlacementsApi(req, res) {
     }
 
     const result = await clearUnavailablePlacements(
+      token,
+      clientLogin,
+      selections,
+    );
+
+    sendJson(res, 200, result);
+  } catch (error) {
+    sendJson(res, error.statusCode || 502, { error: error.message });
+  }
+}
+
+async function handleBlockChannelsApi(req, res) {
+  try {
+    const payload = await readJson(req);
+    const token = requireString(payload, "token", "OAuth-токен");
+    const clientLogin = requireString(payload, "clientLogin", "клиент");
+    const selections = Array.isArray(payload.campaigns) ? payload.campaigns : [];
+
+    if (selections.length === 0) {
+      throw new InputError("Не выбраны кампании с каналами для блокировки.");
+    }
+
+    const result = await blockChannelPlacements(
       token,
       clientLogin,
       selections,
@@ -1478,6 +1982,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "POST" && requestUrl.pathname === "/api/check-channels") {
+    handleCheckChannelsApi(req, res);
+    return;
+  }
+
   if (req.method === "POST" && requestUrl.pathname === "/api/desktop-notification") {
     handleDesktopNotificationApi(req, res);
     return;
@@ -1495,6 +2004,11 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "POST" && requestUrl.pathname === "/api/clear-placements") {
     handleClearPlacementsApi(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/block-channels") {
+    handleBlockChannelsApi(req, res);
     return;
   }
 
@@ -1544,9 +2058,15 @@ server.on("listening", () => {
   }
 });
 
-server.listen(port, host);
+if (process.env.BM_BLOCKED_DISABLE_SERVER !== "1") {
+  server.listen(port, host);
+}
 
-if (isPortableExecutable && parentProcessId > 0) {
+if (
+  process.env.BM_BLOCKED_DISABLE_SERVER !== "1" &&
+  isPortableExecutable &&
+  parentProcessId > 0
+) {
   setInterval(() => {
     try {
       process.kill(parentProcessId, 0);
@@ -1555,3 +2075,11 @@ if (isPortableExecutable && parentProcessId > 0) {
     }
   }, 3000).unref();
 }
+
+export {
+  buildChannelReportDefinition,
+  getLast30DaysRange,
+  normalizeChannelPlacement,
+  parseChannelPerformanceReport,
+  selectChannelsForAvailableSlots,
+};

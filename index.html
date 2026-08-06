@@ -397,7 +397,20 @@
       }
 
       #postTableActions {
+        justify-content: space-between;
+        align-items: flex-start;
         margin-top: var(--space-3);
+      }
+
+      .action-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+      }
+
+      .action-group-right {
+        justify-content: flex-end;
+        margin-left: auto;
       }
 
       .field {
@@ -504,14 +517,16 @@
         color: var(--danger);
       }
 
-      #clearReport {
+      #clearReport,
+      #blockChannels {
         border-color: #db3939;
         background: #db3939;
         color: #ffffff;
       }
 
       .secondary-button:disabled,
-      #clearReport:disabled {
+      #clearReport:disabled,
+      #blockChannels:disabled {
         border-color: var(--disabled);
         background: var(--disabled);
         color: var(--disabled-text);
@@ -588,7 +603,7 @@
 
       table {
         width: 100%;
-        min-width: 760px;
+        min-width: 920px;
         border-collapse: collapse;
       }
 
@@ -655,6 +670,12 @@
         line-height: 1;
       }
 
+      .help-button:focus-visible {
+        outline: 1px solid var(--text-secondary);
+        outline-offset: 2px;
+        box-shadow: none;
+      }
+
       .unavailable-list-cell {
         text-align: left;
         background: var(--surface-subtle);
@@ -705,7 +726,8 @@
           color: var(--text);
         }
 
-        #clearReport:hover:not(:disabled) {
+        #clearReport:hover:not(:disabled),
+        #blockChannels:hover:not(:disabled) {
           border-color: var(--danger-hover);
           background: var(--danger-hover);
           color: #ffffff;
@@ -758,6 +780,12 @@
         .actions button,
         .controls button {
           width: 100%;
+        }
+
+        .action-group,
+        .action-group-right {
+          width: 100%;
+          margin-left: 0;
         }
       }
 
@@ -813,15 +841,11 @@
           </button>
         </div>
         <h1 id="authHeading">Вход</h1>
-        <p>Используйте общую учётную запись компании.</p>
+        <p>Введите общий пароль компании.</p>
         <div class="auth-fields">
           <div class="field">
-            <label for="authUsername">Логин</label>
-            <input id="authUsername" name="username" type="text" autocomplete="username" maxlength="128" required autofocus />
-          </div>
-          <div class="field">
             <label for="authPassword">Пароль</label>
-            <input id="authPassword" name="password" type="password" autocomplete="current-password" maxlength="256" required />
+            <input id="authPassword" name="password" type="password" autocomplete="current-password" maxlength="256" required autofocus />
           </div>
           <button id="authSubmit" type="submit">Войти</button>
         </div>
@@ -893,9 +917,16 @@
 
         <div id="clientField" class="field" hidden>
           <label for="client">Клиент</label>
-          <select id="client" name="client" disabled>
-            <option value="">Сначала загрузите клиентов</option>
-          </select>
+          <input
+            id="client"
+            name="client"
+            type="text"
+            list="clientOptions"
+            autocomplete="off"
+            placeholder="Начните вводить название или логин"
+            disabled
+          />
+          <datalist id="clientOptions"></datalist>
         </div>
 
         <div class="field">
@@ -905,7 +936,7 @@
 
       <section class="actions" aria-label="Действия">
         <button id="loadReport" type="button" hidden disabled>
-          Получить список заблокированных площадок
+          Получить список рекламных кампаний
         </button>
       </section>
 
@@ -939,6 +970,7 @@
               </th>
               <th>Рекламная кампания</th>
               <th>Количество заблокированных площадок</th>
+              <th>Каналы</th>
               <th id="unavailableWebHeader" hidden>Нерабочие web</th>
             </tr>
           </thead>
@@ -947,10 +979,18 @@
       </section>
 
       <section id="postTableActions" class="actions" aria-label="Действия с таблицей" hidden>
-        <button id="checkReport" type="button" disabled>Проверить актуальность</button>
-        <button id="clearReport" type="button" class="secondary-button" hidden disabled>
-          Очистить
-        </button>
+        <div class="action-group">
+          <button id="checkReport" type="button" disabled>Проверить актуальность</button>
+          <button id="clearReport" type="button" class="secondary-button" hidden disabled>
+            Очистить
+          </button>
+        </div>
+        <div class="action-group action-group-right">
+          <button id="checkChannels" type="button" disabled>Проверить каналы (tg, max и т.д.)</button>
+          <button id="blockChannels" type="button" class="secondary-button" hidden disabled>
+            Заблокировать каналы (tg, max и т.д.)
+          </button>
+        </div>
       </section>
 
       <div id="emptyState" class="table-wrap empty" hidden>
@@ -961,7 +1001,6 @@
     <script>
       const authGate = document.querySelector("#authGate");
       const authForm = document.querySelector("#authForm");
-      const authUsernameInput = document.querySelector("#authUsername");
       const authPasswordInput = document.querySelector("#authPassword");
       const authSubmitButton = document.querySelector("#authSubmit");
       const authStatusText = document.querySelector("#authStatus");
@@ -973,11 +1012,14 @@
       const logoutButton = document.querySelector("#logoutButton");
       const tokenInput = document.querySelector("#token");
       const clientSelect = document.querySelector("#client");
+      const clientOptions = document.querySelector("#clientOptions");
       const clientField = document.querySelector("#clientField");
       const loadClientsButton = document.querySelector("#loadClients");
       const loadReportButton = document.querySelector("#loadReport");
       const checkReportButton = document.querySelector("#checkReport");
       const clearReportButton = document.querySelector("#clearReport");
+      const checkChannelsButton = document.querySelector("#checkChannels");
+      const blockChannelsButton = document.querySelector("#blockChannels");
       const postTableActions = document.querySelector("#postTableActions");
       const selectAllCampaigns = document.querySelector("#selectAllCampaigns");
       const statusText = document.querySelector("#status");
@@ -1003,6 +1045,7 @@
       let clients = [];
       let currentCampaigns = [];
       let hasActualityCheck = false;
+      let hasChannelCheck = false;
       let updatePollTimer = null;
       let displayedUpdateRevision = -1;
       const checkedCampaignIds = new Set();
@@ -1054,7 +1097,6 @@
       }
 
       function setAuthBusy(isBusy) {
-        authUsernameInput.disabled = isBusy;
         authPasswordInput.disabled = isBusy;
         authSubmitButton.disabled = isBusy;
       }
@@ -1232,12 +1274,11 @@
         renderClients([]);
         resetReport();
         authStatusText.textContent = message;
-        authUsernameInput.disabled = !configured;
         authPasswordInput.disabled = !configured;
         authSubmitButton.disabled = !configured;
 
         if (configured) {
-          authUsernameInput.focus();
+          authPasswordInput.focus();
         }
       }
 
@@ -1290,6 +1331,7 @@
       function resetReport() {
         currentCampaigns = [];
         hasActualityCheck = false;
+        hasChannelCheck = false;
         checkedCampaignIds.clear();
         selectAllCampaigns.checked = false;
         selectAllCampaigns.indeterminate = false;
@@ -1297,6 +1339,9 @@
         checkReportButton.disabled = true;
         clearReportButton.hidden = true;
         clearReportButton.disabled = true;
+        checkChannelsButton.disabled = true;
+        blockChannelsButton.hidden = true;
+        blockChannelsButton.disabled = true;
         summary.hidden = true;
         results.hidden = true;
         emptyState.hidden = true;
@@ -1312,7 +1357,8 @@
 
       function renderClients(nextClients) {
         clients = nextClients;
-        clientSelect.innerHTML = "";
+        clientSelect.value = "";
+        clientOptions.innerHTML = "";
 
         if (clients.length === 0) {
           clientField.hidden = true;
@@ -1321,7 +1367,7 @@
           clientSelect.disabled = true;
           loadReportButton.disabled = true;
           checkReportButton.disabled = true;
-          clientSelect.append(new Option("Клиенты не найдены", ""));
+          checkChannelsButton.disabled = true;
           return;
         }
 
@@ -1331,17 +1377,27 @@
         clientSelect.disabled = false;
         loadReportButton.disabled = true;
         checkReportButton.disabled = true;
-        clientSelect.append(new Option("Выберите клиента", ""));
+        checkChannelsButton.disabled = true;
 
         for (const client of clients) {
-          const option = new Option(client.name, client.login);
+          const option = document.createElement("option");
+
+          option.value = client.name;
+          option.label = client.login && !client.name.includes(client.login)
+            ? `${client.name} (${client.login})`
+            : client.name;
           option.dataset.id = client.id || "";
-          clientSelect.append(option);
+          clientOptions.append(option);
         }
       }
 
       function getSelectedClient() {
-        return clients.find((client) => client.login === clientSelect.value);
+        const query = clientSelect.value.trim().toLocaleLowerCase("ru");
+
+        return clients.find((client) =>
+          client.name.toLocaleLowerCase("ru") === query ||
+          client.login.toLocaleLowerCase("ru") === query,
+        );
       }
 
       function getUnavailableSitesByType(campaign, type) {
@@ -1358,6 +1414,7 @@
       function renderReport(payload, options = {}) {
         currentCampaigns = payload.campaigns || [];
         hasActualityCheck = hasActualityCheck || Boolean(options.withActualityCheck);
+        hasChannelCheck = hasChannelCheck || Boolean(options.withChannelCheck);
         reportBody.innerHTML = "";
 
         campaignCount.textContent = String(payload.totalCampaigns || currentCampaigns.length);
@@ -1374,7 +1431,9 @@
         emptyState.hidden = currentCampaigns.length > 0;
         postTableActions.hidden = currentCampaigns.length === 0;
         clearReportButton.hidden = !hasActualityCheck;
+        blockChannelsButton.hidden = !hasChannelCheck;
         updateCheckButtonState();
+        updateChannelButtonsState();
         updateClearButtonState();
         updateSelectAllState();
 
@@ -1398,13 +1457,14 @@
             }
 
             updateCheckButtonState();
+            updateChannelButtonsState();
             updateClearButtonState();
             updateSelectAllState();
           });
           selectCell.append(checkbox);
           nameCell.textContent = campaign.campaignName;
           countCell.textContent = String(campaign.blockedCount);
-          row.append(selectCell, nameCell, countCell);
+          row.append(selectCell, nameCell, countCell, createChannelCell(row, campaign));
 
           if (hasActualityCheck) {
             row.append(createUnavailableCell(row, campaign, "web"));
@@ -1412,6 +1472,34 @@
 
           reportBody.append(row);
         }
+      }
+
+      function createChannelCell(row, campaign) {
+        const cell = document.createElement("td");
+        const count = document.createElement("span");
+        const channels = Array.isArray(campaign.channels) ? campaign.channels : [];
+        const isChecked = Array.isArray(campaign.channels);
+
+        count.textContent = isChecked ? String(channels.length) : "—";
+        cell.append(count);
+
+        if (channels.length > 0) {
+          const helpButton = document.createElement("button");
+
+          helpButton.type = "button";
+          helpButton.className = "help-button";
+          helpButton.textContent = "?";
+          helpButton.setAttribute(
+            "aria-label",
+            `Показать каналы кампании ${campaign.campaignName}`,
+          );
+          helpButton.addEventListener("click", () =>
+            toggleChannelDetails(row, campaign),
+          );
+          cell.append(helpButton);
+        }
+
+        return cell;
       }
 
       function createUnavailableCell(row, campaign, type) {
@@ -1449,6 +1537,45 @@
           selectedCount > 0
             ? `Проверить актуальность (${selectedCount})`
             : "Проверить актуальность";
+      }
+
+      function campaignHasChannelCheck(campaign) {
+        return Array.isArray(campaign.channels);
+      }
+
+      function updateChannelButtonsState() {
+        const selectedCampaigns = currentCampaigns.filter((campaign) =>
+          checkedCampaignIds.has(campaign.campaignId),
+        );
+        const selectedCount = selectedCampaigns.length;
+        const allSelectedChecked =
+          selectedCount > 0 && selectedCampaigns.every(campaignHasChannelCheck);
+        const channelsToBlock = selectedCampaigns.reduce(
+          (sum, campaign) =>
+            sum + (campaign.channels || []).filter(
+              (channel) => !channel.isBlocked && !channel.skippedByLimit,
+            ).length,
+          0,
+        );
+
+        checkChannelsButton.disabled = selectedCount === 0;
+        checkChannelsButton.textContent = selectedCount > 0
+          ? `Проверить каналы (tg, max и т.д.) (${selectedCount})`
+          : "Проверить каналы (tg, max и т.д.)";
+        blockChannelsButton.hidden = !hasChannelCheck;
+        blockChannelsButton.disabled = !allSelectedChecked || channelsToBlock === 0;
+
+        if (selectedCount === 0) {
+          blockChannelsButton.title = "Выберите кампании.";
+        } else if (!allSelectedChecked) {
+          blockChannelsButton.title =
+            "Сначала проверьте каналы во всех выбранных кампаниях.";
+        } else if (channelsToBlock === 0) {
+          blockChannelsButton.title =
+            "В выбранных кампаниях нет новых каналов для блокировки.";
+        } else {
+          blockChannelsButton.title = "";
+        }
       }
 
       function campaignHasActualityCheck(campaign) {
@@ -1531,6 +1658,63 @@
         return site.error ? ` ${site.error}` : "";
       }
 
+      function formatChannelCost(cost) {
+        return new Intl.NumberFormat("ru-RU", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(Number(cost) || 0);
+      }
+
+      function toggleChannelDetails(row, campaign) {
+        const nextRow = row.nextElementSibling;
+        const detailsKey = `${campaign.campaignId}:channels`;
+
+        if (nextRow?.dataset.detailsFor === detailsKey) {
+          nextRow.remove();
+          return;
+        }
+
+        for (const detailsRow of reportBody.querySelectorAll("[data-details-for]")) {
+          detailsRow.remove();
+        }
+
+        const channels = [...(campaign.channels || [])].sort((left, right) =>
+          right.cost - left.cost || left.placement.localeCompare(right.placement, "ru"),
+        );
+        const detailsRow = document.createElement("tr");
+        const detailsCell = document.createElement("td");
+        const counter = document.createElement("span");
+        const list = document.createElement("ul");
+
+        detailsRow.dataset.detailsFor = detailsKey;
+        detailsCell.colSpan = 4 + (hasActualityCheck ? 1 : 0);
+        detailsCell.className = "unavailable-list-cell";
+        counter.className = "unavailable-meta";
+        counter.textContent = `Каналов с расходом больше 50 ₽ без НДС: ${channels.length}.`;
+        list.className = "unavailable-list";
+
+        for (const channel of channels) {
+          const item = document.createElement("li");
+          const link = document.createElement("a");
+          const meta = document.createElement("span");
+
+          link.href = channel.url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.textContent = channel.placement;
+          meta.className = "unavailable-meta";
+          meta.textContent = ` ${formatChannelCost(channel.cost)} ₽ без НДС${
+            channel.skippedByLimit ? " · не заблокирован: лимит 1000 площадок" : ""
+          }`;
+          item.append(link, meta);
+          list.append(item);
+        }
+
+        detailsCell.append(counter, list);
+        detailsRow.append(detailsCell);
+        row.after(detailsRow);
+      }
+
       function toggleUnavailableDetails(row, campaign, type) {
         const nextRow = row.nextElementSibling;
         const detailsKey = `${campaign.campaignId}:${type}`;
@@ -1551,7 +1735,7 @@
         const allSites = getUnavailableSitesByType(campaign, type).sort((left, right) => {
           return left.placement.localeCompare(right.placement, "ru");
         });
-        const columnCount = hasActualityCheck ? 4 : 3;
+        const columnCount = 4 + (hasActualityCheck ? 1 : 0);
 
         detailsRow.dataset.detailsFor = detailsKey;
         detailsCell.colSpan = columnCount;
@@ -1670,7 +1854,7 @@
         } catch (error) {
           setStatus(error.message, "error");
         } finally {
-          setBusy(loadReportButton, false, "Получить список заблокированных площадок");
+          setBusy(loadReportButton, false, "Получить список рекламных кампаний");
         }
       });
 
@@ -1692,6 +1876,8 @@
 
         setStatus("Проверяю web-площадки выбранных кампаний. App-площадки будут пропущены...");
         setBusy(checkReportButton, true, "Проверка...");
+        checkChannelsButton.disabled = true;
+        blockChannelsButton.disabled = true;
         loadReportButton.disabled = true;
 
         try {
@@ -1724,6 +1910,72 @@
         } finally {
           setBusy(checkReportButton, false, "Проверить актуальность");
           updateCheckButtonState();
+          updateChannelButtonsState();
+          loadReportButton.disabled = false;
+        }
+      });
+
+      checkChannelsButton.addEventListener("click", async () => {
+        const token = tokenInput.value.trim();
+        const client = getSelectedClient();
+
+        if (!token || !client) {
+          setStatus("Сначала загрузите клиентов и выберите клиента.", "error");
+          return;
+        }
+
+        if (checkedCampaignIds.size === 0) {
+          setStatus("Выберите кампании для проверки каналов.", "error");
+          return;
+        }
+
+        const campaignIds = Array.from(checkedCampaignIds);
+
+        setStatus("Проверяю расходы по каналам за последние 30 дней...");
+        setBusy(checkChannelsButton, true, "Проверка каналов...");
+        checkReportButton.disabled = true;
+        clearReportButton.disabled = true;
+        loadReportButton.disabled = true;
+
+        try {
+          const payload = await postJson("/api/check-channels", {
+            token,
+            clientLogin: client.login,
+            campaignIds,
+          });
+          const mergedCampaigns = mergeCheckedCampaigns(payload.campaigns || []);
+          renderReport({
+            campaigns: mergedCampaigns,
+            totalCampaigns: mergedCampaigns.length,
+            totalBlockedSites: mergedCampaigns.reduce(
+              (sum, campaign) => sum + campaign.blockedCount,
+              0,
+            ),
+            totalUnavailableSites: mergedCampaigns.reduce(
+              (sum, campaign) => sum + (campaign.unavailableCount || 0),
+              0,
+            ),
+            skippedAppSites: Number(skippedAppsCount.textContent) || 0,
+          }, { withChannelCheck: true });
+          setStatus(
+            `Проверка каналов завершена. Найдено площадок с расходом больше 50 ₽ без НДС: ${payload.totalChannels || 0}.`,
+            "success",
+          );
+          notifyCheckCompletion("success", {
+            checkType: "channels",
+            campaignCount: payload.totalCampaigns || 0,
+          });
+        } catch (error) {
+          setStatus(error.message, "error");
+          notifyCheckCompletion("error", {
+            checkType: "channels",
+            error: error.message,
+          });
+        } finally {
+          setBusy(checkChannelsButton, false, "Проверить каналы (tg, max и т.д.)");
+          updateCheckButtonState();
+          updateChannelButtonsState();
+          updateClearButtonState();
           loadReportButton.disabled = false;
         }
       });
@@ -1773,6 +2025,8 @@
         setStatus("Удаляю нерабочие площадки из выбранных кампаний...");
         setBusy(clearReportButton, true, "Очистка...");
         checkReportButton.disabled = true;
+        checkChannelsButton.disabled = true;
+        blockChannelsButton.disabled = true;
         loadReportButton.disabled = true;
 
         try {
@@ -1829,6 +2083,153 @@
         } finally {
           setBusy(clearReportButton, false, "Очистить");
           updateCheckButtonState();
+          updateChannelButtonsState();
+          updateClearButtonState();
+          loadReportButton.disabled = false;
+        }
+      });
+
+      blockChannelsButton.addEventListener("click", async () => {
+        const token = tokenInput.value.trim();
+        const client = getSelectedClient();
+        const selectedCampaigns = currentCampaigns.filter((campaign) =>
+          checkedCampaignIds.has(campaign.campaignId),
+        );
+
+        if (!token || !client) {
+          setStatus("Сначала загрузите клиентов и выберите клиента.", "error");
+          return;
+        }
+
+        if (
+          selectedCampaigns.length === 0 ||
+          selectedCampaigns.some((campaign) => !campaignHasChannelCheck(campaign))
+        ) {
+          setStatus(
+            "Сначала проверьте каналы во всех выбранных кампаниях.",
+            "error",
+          );
+          updateChannelButtonsState();
+          return;
+        }
+
+        const campaignsToBlock = selectedCampaigns
+          .map((campaign) => ({
+            campaignId: campaign.campaignId,
+            channels: campaign.channels.filter(
+              (channel) => !channel.isBlocked && !channel.skippedByLimit,
+            ),
+          }))
+          .filter((campaign) => campaign.channels.length > 0);
+
+        if (campaignsToBlock.length === 0) {
+          setStatus("В выбранных кампаниях нет новых каналов для блокировки.", "error");
+          updateChannelButtonsState();
+          return;
+        }
+
+        setStatus("Добавляю найденные каналы в запрещенные площадки...");
+        setBusy(blockChannelsButton, true, "Блокировка...");
+        checkChannelsButton.disabled = true;
+        checkReportButton.disabled = true;
+        clearReportButton.disabled = true;
+        loadReportButton.disabled = true;
+
+        try {
+          const payload = await postJson("/api/block-channels", {
+            token,
+            clientLogin: client.login,
+            campaigns: campaignsToBlock,
+          });
+          const updatedById = new Map(
+            (payload.updatedCampaigns || []).map((campaign) => [
+              campaign.campaignId,
+              campaign,
+            ]),
+          );
+          const skippedById = new Map(
+            (payload.limitSkippedCampaigns || []).map((campaign) => [
+              campaign.campaignId,
+              campaign,
+            ]),
+          );
+
+          currentCampaigns = currentCampaigns.map((campaign) => {
+            const update = updatedById.get(campaign.campaignId);
+            const limitResult = skippedById.get(campaign.campaignId);
+
+            if (!update && !limitResult) {
+              return campaign;
+            }
+
+            const blockedChannelKeys = new Set(
+              (update?.blockedChannels || []).map((placement) => placement.toLowerCase()),
+            );
+            const skippedChannelKeys = new Set(
+              (limitResult?.skippedChannels || update?.skippedChannels || []).map(
+                (placement) => placement.toLowerCase(),
+              ),
+            );
+
+            return {
+              ...campaign,
+              blockedCount: update?.blockedCount ?? campaign.blockedCount,
+              channels: (campaign.channels || [])
+                .filter(
+                  (channel) =>
+                    !blockedChannelKeys.has(channel.placement.toLowerCase()),
+                )
+                .map((channel) => ({
+                  ...channel,
+                  skippedByLimit: skippedChannelKeys.has(
+                    channel.placement.toLowerCase(),
+                  ),
+                })),
+            };
+          });
+
+          renderReport({
+            campaigns: currentCampaigns,
+            totalCampaigns: currentCampaigns.length,
+            totalBlockedSites: currentCampaigns.reduce(
+              (sum, campaign) => sum + campaign.blockedCount,
+              0,
+            ),
+            totalUnavailableSites: currentCampaigns.reduce(
+              (sum, campaign) => sum + (campaign.unavailableCount || 0),
+              0,
+            ),
+            skippedAppSites: Number(skippedAppsCount.textContent) || 0,
+          }, { withChannelCheck: true });
+
+          const failedCount = (payload.failedCampaigns || []).length;
+          const skippedCount = payload.totalSkippedByLimit || 0;
+          const statusParts = [
+            `Заблокировано каналов: ${payload.totalBlocked || 0}.`,
+          ];
+
+          if (skippedCount > 0) {
+            statusParts.push(`Не поместилось из-за лимита: ${skippedCount}.`);
+          }
+
+          if (failedCount > 0) {
+            statusParts.push(`Не удалось обновить кампаний: ${failedCount}.`);
+          }
+
+          setStatus(
+            statusParts.join(" "),
+            failedCount > 0 ? "error" : "success",
+          );
+        } catch (error) {
+          setStatus(error.message, "error");
+        } finally {
+          setBusy(
+            blockChannelsButton,
+            false,
+            "Заблокировать каналы (tg, max и т.д.)",
+          );
+          updateCheckButtonState();
+          updateChannelButtonsState();
           updateClearButtonState();
           loadReportButton.disabled = false;
         }
@@ -1855,10 +2256,12 @@
         }, { withActualityCheck: hasActualityCheck });
       });
 
-      clientSelect.addEventListener("change", resetReport);
-      clientSelect.addEventListener("change", () => {
-        loadReportButton.hidden = !clientSelect.value;
-        loadReportButton.disabled = !clientSelect.value;
+      clientSelect.addEventListener("input", resetReport);
+      clientSelect.addEventListener("input", () => {
+        const hasSelectedClient = Boolean(getSelectedClient());
+
+        loadReportButton.hidden = !hasSelectedClient;
+        loadReportButton.disabled = !hasSelectedClient;
       });
       tokenInput.addEventListener("input", () => {
         renderClients([]);
@@ -1902,7 +2305,6 @@
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              username: authUsernameInput.value.trim(),
               password: authPasswordInput.value,
             }),
           });
