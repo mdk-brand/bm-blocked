@@ -40,7 +40,7 @@ test("recognizes supported channel placements with a non-empty path", () => {
   assert.equal(normalizeChannelPlacement("example.ru/channel"), null);
 });
 
-test("aggregates channel costs and keeps only costs strictly above 50", () => {
+test("aggregates channel costs and keeps only costs strictly above 15", () => {
   const campaigns = [
     {
       campaignId: "101",
@@ -52,9 +52,9 @@ test("aggregates channel costs and keeps only costs strictly above 50", () => {
     },
   ];
   const report = [
-    "101\tt.me/company\t30.00",
-    "101\tt.me/company\t20.01",
-    "101\tvk.com/exactly-fifty\t50.00",
+    "101\tt.me/company\t10.00",
+    "101\tt.me/company\t5.01",
+    "101\tvk.com/exactly-fifteen\t15.00",
     "101\tweb.max.ru/company\t75.40",
     "101\tt.me/already-blocked\t120.00",
     "101\texample.ru/not-a-channel\t999.00",
@@ -71,7 +71,7 @@ test("aggregates channel costs and keeps only costs strictly above 50", () => {
     })),
     [
       { placement: "web.max.ru/company", cost: 75.4, isBlocked: undefined },
-      { placement: "t.me/company", cost: 50.01, isBlocked: undefined },
+      { placement: "t.me/company", cost: 15.01, isBlocked: undefined },
     ],
   );
   assert.equal(parsed.get("202")[0].placement, "rutube.ru/channel/42");

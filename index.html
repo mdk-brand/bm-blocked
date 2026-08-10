@@ -1690,7 +1690,7 @@
         detailsCell.colSpan = 4 + (hasActualityCheck ? 1 : 0);
         detailsCell.className = "unavailable-list-cell";
         counter.className = "unavailable-meta";
-        counter.textContent = `Каналов с расходом больше 50 ₽ без НДС: ${channels.length}.`;
+        counter.textContent = `Каналов с расходом больше 15 ₽ без НДС: ${channels.length}.`;
         list.className = "unavailable-list";
 
         for (const channel of channels) {
@@ -1958,7 +1958,7 @@
             skippedAppSites: Number(skippedAppsCount.textContent) || 0,
           }, { withChannelCheck: true });
           setStatus(
-            `Проверка каналов завершена. Найдено площадок с расходом больше 50 ₽ без НДС: ${payload.totalChannels || 0}.`,
+            `Проверка каналов завершена. Найдено площадок с расходом больше 15 ₽ без НДС: ${payload.totalChannels || 0}.`,
             "success",
           );
           notifyCheckCompletion("success", {
