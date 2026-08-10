@@ -18,20 +18,24 @@ using Microsoft.Toolkit.Uwp.Notifications;
 [assembly: System.Reflection.AssemblyDescription("Проверка заблокированных площадок Яндекс Директа")]
 [assembly: System.Reflection.AssemblyCompany("Brandmaker")]
 [assembly: System.Reflection.AssemblyProduct("bm-blocked")]
-[assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.1.0")]
 
 namespace BmBlocked
 {
     internal static class Program
     {
         private const string SingleInstanceMutexName = @"Local\BmBlockedSingleInstance";
+        internal const string NotificationPipeName = "bm-blocked-notifications";
         internal const string UpdateStagingVariable = "BM_BLOCKED_UPDATE_STAGING";
         internal const string UpdateTargetVariable = "BM_BLOCKED_UPDATE_TARGET";
         internal const string UpdateParentVariable = "BM_BLOCKED_UPDATE_PARENT";
         private static readonly object ToastActionSync = new object();
+        private static readonly ManualResetEventSlim ToastActionReceived =
+            new ManualResetEventSlim(false);
         private static Action<string> toastActionHandler;
         private static string pendingToastAction;
+        private static bool currentProcessToastActivated;
 
         [STAThread]
         private static void Main(string[] args)
@@ -73,9 +77,21 @@ namespace BmBlocked
             {
                 if (!isFirstInstance)
                 {
-                    if (Environment.GetEnvironmentVariable("BM_BLOCKED_LAUNCHER_NO_BROWSER") != "1")
+                    var toastAction = TakeStartupToastAction();
+
+                    if (!String.IsNullOrWhiteSpace(toastAction))
                     {
-                        TrayAppContext.OpenService();
+                        if (!ForwardToRunningInstance("update-action", toastAction))
+                        {
+                            TrayAppContext.OpenService();
+                        }
+                    }
+                    else if (Environment.GetEnvironmentVariable("BM_BLOCKED_LAUNCHER_NO_BROWSER") != "1")
+                    {
+                        if (!ForwardToRunningInstance("open", ""))
+                        {
+                            TrayAppContext.OpenService();
+                        }
                     }
                     return;
                 }
@@ -122,6 +138,8 @@ namespace BmBlocked
                         action = "";
                     }
 
+                    ToastActionReceived.Set();
+
                     if (String.IsNullOrWhiteSpace(action))
                     {
                         return;
@@ -145,10 +163,60 @@ namespace BmBlocked
                     }
                 };
 
-                ToastNotificationManagerCompat.WasCurrentProcessToastActivated();
+                currentProcessToastActivated =
+                    ToastNotificationManagerCompat.WasCurrentProcessToastActivated();
             }
             catch
             {
+            }
+        }
+
+        private static string TakeStartupToastAction()
+        {
+            if (currentProcessToastActivated)
+            {
+                ToastActionReceived.Wait(3000);
+            }
+
+            lock (ToastActionSync)
+            {
+                var action = pendingToastAction;
+                pendingToastAction = null;
+                return action;
+            }
+        }
+
+        private static bool ForwardToRunningInstance(string type, string action)
+        {
+            try
+            {
+                var payload = new Dictionary<string, object>
+                {
+                    { "type", type },
+                    { "action", action ?? "" }
+                };
+                var json = new JavaScriptSerializer().Serialize(payload);
+
+                using (var pipe = new NamedPipeClientStream(
+                    ".",
+                    NotificationPipeName,
+                    PipeDirection.Out))
+                {
+                    pipe.Connect(3000);
+
+                    using (var writer = new StreamWriter(
+                        pipe,
+                        new UTF8Encoding(false)))
+                    {
+                        writer.Write(json);
+                    }
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -790,8 +858,7 @@ namespace BmBlocked
     internal sealed class TrayAppContext : ApplicationContext
     {
         private const string Url = "http://127.0.0.1:8124/index.html";
-        private readonly string notificationPipeName =
-            "bm-blocked-notifications-" + Process.GetCurrentProcess().Id;
+        private readonly string notificationPipeName = Program.NotificationPipeName;
         private readonly string internalToken = Guid.NewGuid().ToString("N");
         private readonly NotifyIcon trayIcon;
         private readonly ToolStripMenuItem checkUpdatesItem;
@@ -1137,6 +1204,7 @@ namespace BmBlocked
 
             RemoveUpdateToast();
             PublishUpdateState(availableRelease, true);
+            OpenService();
         }
 
         private void PublishUpdateState(ReleaseInfo release, bool showReleaseNotes)
@@ -1491,6 +1559,10 @@ namespace BmBlocked
                             !String.IsNullOrWhiteSpace(action))
                         {
                             HandleUpdateAction(action);
+                        }
+                        else if (String.Equals(type, "open", StringComparison.OrdinalIgnoreCase))
+                        {
+                            SafeBeginInvoke(delegate { OpenService(); });
                         }
                         else if (!String.IsNullOrWhiteSpace(message))
                         {
