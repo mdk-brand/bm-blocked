@@ -28,10 +28,17 @@ const authConfigPath = path.join(root, "auth-config.json");
 const settingsPath = path.join(root, "settings.json");
 const lastOperationPath = path.join(root, "last-operation.json");
 const excludedSitesLimit = 1000;
+const availableChannelPrefixes = Object.freeze([
+  "t.me/",
+  "max.ru/",
+  "web.max.ru/",
+  "vk.com/",
+  "rutube.ru/",
+]);
 const defaultChannelSettings = Object.freeze({
   costThreshold: 15,
   periodDays: 30,
-  prefixes: ["t.me/", "max.ru/", "web.max.ru/", "vk.com/", "rutube.ru/"],
+  prefixes: [...availableChannelPrefixes],
 });
 const authCookieName = "bm_blocked_session";
 const authSessionDurationSeconds = 12 * 60 * 60;
@@ -169,14 +176,14 @@ function normalizeChannelSettings(value = {}) {
     throw new InputError("Период проверки должен быть от 1 до 365 дней.");
   }
 
-  if (prefixes.length === 0 || prefixes.length > 30) {
-    throw new InputError("Укажите от 1 до 30 корректных префиксов каналов.");
-  }
-
   if (prefixes.length !== rawPrefixes.length) {
     throw new InputError(
-      "Префиксы каналов должны иметь вид t.me/ или example.ru/channels/ без протокола и параметров.",
+      "Список префиксов каналов содержит некорректное или повторяющееся значение.",
     );
+  }
+
+  if (prefixes.some((prefix) => !availableChannelPrefixes.includes(prefix))) {
+    throw new InputError("Можно выбирать только поддерживаемые префиксы каналов.");
   }
 
   return {
@@ -2099,14 +2106,20 @@ async function handleBlockedPlacementsApi(req, res) {
 }
 
 function handleGetSettingsApi(req, res) {
-  sendJson(res, 200, { channelSettings: toPublicChannelSettings() });
+  sendJson(res, 200, {
+    channelSettings: toPublicChannelSettings(),
+    availableChannelPrefixes: [...availableChannelPrefixes],
+  });
 }
 
 async function handleSaveSettingsApi(req, res) {
   try {
     const payload = await readJson(req);
     const savedSettings = await saveChannelSettings(payload.channelSettings || {});
-    sendJson(res, 200, { channelSettings: toPublicChannelSettings(savedSettings) });
+    sendJson(res, 200, {
+      channelSettings: toPublicChannelSettings(savedSettings),
+      availableChannelPrefixes: [...availableChannelPrefixes],
+    });
   } catch (error) {
     sendJson(res, error.statusCode || 500, { error: error.message });
   }

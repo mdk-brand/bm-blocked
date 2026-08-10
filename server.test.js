@@ -111,22 +111,44 @@ test("builds a configurable inclusive report range", () => {
   });
 });
 
-test("uses a custom threshold and custom channel prefixes", () => {
+test("uses a custom threshold and selected supported channel prefixes", () => {
   const settings = normalizeChannelSettings({
     costThreshold: 25.5,
     periodDays: 14,
-    prefixes: ["example.ru/channels/", "t.me/"],
+    prefixes: ["t.me/", "vk.com/"],
   });
   const campaigns = [{ campaignId: "101", blockedSites: [] }];
   const report = [
-    "101\texample.ru/channels/working\t25.51",
-    "101\texample.ru/other\t100.00",
+    "101\tt.me/working\t25.51",
+    "101\tmax.ru/not-selected\t100.00",
     "101\tt.me/exact-threshold\t25.50",
   ].join("\n");
   const parsed = parseChannelPerformanceReport(report, campaigns, settings);
 
   assert.deepEqual(
     parsed.get("101").map((channel) => channel.placement),
-    ["example.ru/channels/working"],
+    ["t.me/working"],
+  );
+});
+
+test("allows disabling every channel prefix", () => {
+  assert.deepEqual(
+    normalizeChannelSettings({
+      costThreshold: 15,
+      periodDays: 30,
+      prefixes: [],
+    }).prefixes,
+    [],
+  );
+});
+
+test("rejects channel prefixes outside the fixed list", () => {
+  assert.throws(
+    () => normalizeChannelSettings({
+      costThreshold: 15,
+      periodDays: 30,
+      prefixes: ["example.ru/channels/"],
+    }),
+    /поддерживаемые префиксы/,
   );
 });

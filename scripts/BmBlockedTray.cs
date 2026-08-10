@@ -18,8 +18,8 @@ using Microsoft.Toolkit.Uwp.Notifications;
 [assembly: System.Reflection.AssemblyDescription("Проверка заблокированных площадок Яндекс Директа")]
 [assembly: System.Reflection.AssemblyCompany("Brandmaker")]
 [assembly: System.Reflection.AssemblyProduct("bm-blocked")]
-[assembly: System.Reflection.AssemblyVersion("1.1.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.1.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.2.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.2.0")]
 
 namespace BmBlocked
 {

@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>bm-blocked</title>
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=1.1.1" />
-    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico?v=1.1.1" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=1.1.2" />
+    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico?v=1.1.2" />
     <meta name="theme-color" content="#f5f5f7" />
     <script>
       try {
@@ -315,9 +315,80 @@
         grid-column: 1 / -1;
       }
 
-      .settings-button {
-        font-size: 18px;
-        line-height: 1;
+      .settings-number-field {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .settings-number-field label {
+        display: flex;
+        min-height: 39px;
+        align-items: flex-end;
+      }
+
+      .settings-button svg {
+        width: 18px;
+        height: 18px;
+      }
+
+      .prefix-options {
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+
+      .prefix-options legend {
+        margin-bottom: var(--space-2);
+        color: var(--text);
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1.3;
+      }
+
+      .prefix-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .prefix-option {
+        display: flex;
+        min-width: 0;
+        min-height: 42px;
+        align-items: center;
+        gap: 10px;
+        margin: 0;
+        padding: 8px 10px;
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius-sm);
+        background: var(--surface-subtle);
+        cursor: pointer;
+      }
+
+      .prefix-option input {
+        flex: 0 0 auto;
+        margin: 0;
+      }
+
+      .prefix-option-copy {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        line-height: 1.25;
+      }
+
+      .prefix-option-name {
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .prefix-option code {
+        color: var(--text-secondary);
+        font-family: Consolas, "Courier New", monospace;
+        font-size: 12px;
+        overflow-wrap: anywhere;
       }
 
       .preview-table {
@@ -916,6 +987,14 @@
           grid-column: auto;
         }
 
+        .settings-number-field label {
+          min-height: 0;
+        }
+
+        .prefix-grid {
+          grid-template-columns: 1fr;
+        }
+
         .check-progress {
           grid-template-columns: 1fr;
         }
@@ -1038,17 +1117,19 @@
           <p>Параметры применяются ко всем проверкам на этом компьютере.</p>
         </div>
         <div class="dialog-body settings-fields">
-          <div class="field">
+          <div class="field settings-number-field">
             <label for="channelThreshold">Порог расхода, ₽ без НДС</label>
             <input id="channelThreshold" type="number" min="0" max="1000000" step="0.01" required />
           </div>
-          <div class="field">
+          <div class="field settings-number-field">
             <label for="channelPeriod">Период, дней</label>
             <input id="channelPeriod" type="number" min="1" max="365" step="1" required />
           </div>
           <div class="field settings-prefixes">
-            <label for="channelPrefixes">Префиксы каналов, по одному в строке</label>
-            <textarea id="channelPrefixes" spellcheck="false" required></textarea>
+            <fieldset class="prefix-options">
+              <legend>Каналы для проверки</legend>
+              <div id="channelPrefixOptions" class="prefix-grid"></div>
+            </fieldset>
           </div>
         </div>
         <p id="settingsStatus" class="update-status" aria-live="polite"></p>
@@ -1106,7 +1187,9 @@
             aria-label="Настройки каналов"
             title="Настройки каналов"
           >
-            ⚙
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94z" />
+            </svg>
           </button>
           <button
             class="theme-toggle"
@@ -1132,7 +1215,7 @@
     <main id="workspace" hidden>
 
       <section class="controls" aria-label="Параметры отчета">
-        <div class="field">
+        <div id="tokenField" class="field">
           <label for="token">OAuth-токен Яндекс Директа</label>
           <input
             id="token"
@@ -1260,7 +1343,8 @@
       const settingsStatus = document.querySelector("#settingsStatus");
       const channelThresholdInput = document.querySelector("#channelThreshold");
       const channelPeriodInput = document.querySelector("#channelPeriod");
-      const channelPrefixesInput = document.querySelector("#channelPrefixes");
+      const channelPrefixOptions = document.querySelector("#channelPrefixOptions");
+      const tokenField = document.querySelector("#tokenField");
       const tokenInput = document.querySelector("#token");
       const clientSelect = document.querySelector("#client");
       const clientOptions = document.querySelector("#clientOptions");
@@ -1315,6 +1399,20 @@
         costThreshold: 15,
         periodDays: 30,
         prefixes: ["t.me/", "max.ru/", "web.max.ru/", "vk.com/", "rutube.ru/"],
+      };
+      let availableChannelPrefixes = [
+        "t.me/",
+        "max.ru/",
+        "web.max.ru/",
+        "vk.com/",
+        "rutube.ru/",
+      ];
+      const channelPrefixNames = {
+        "t.me/": "Telegram",
+        "max.ru/": "MAX",
+        "web.max.ru/": "MAX Web",
+        "vk.com/": "VK",
+        "rutube.ru/": "Rutube",
       };
       let channelPreviewResolver = null;
       let updatePollTimer = null;
@@ -1606,31 +1704,67 @@
         return payload;
       }
 
-      function applyChannelSettings(nextSettings) {
+      function renderChannelPrefixOptions() {
+        const selectedPrefixes = new Set(channelSettings.prefixes);
+
+        channelPrefixOptions.innerHTML = "";
+
+        for (const prefix of availableChannelPrefixes) {
+          const option = document.createElement("label");
+          const checkbox = document.createElement("input");
+          const copy = document.createElement("span");
+          const name = document.createElement("span");
+          const code = document.createElement("code");
+
+          option.className = "prefix-option";
+          checkbox.type = "checkbox";
+          checkbox.value = prefix;
+          checkbox.checked = selectedPrefixes.has(prefix);
+          copy.className = "prefix-option-copy";
+          name.className = "prefix-option-name";
+          name.textContent = channelPrefixNames[prefix] || prefix;
+          code.textContent = prefix;
+          copy.append(name, code);
+          option.append(checkbox, copy);
+          channelPrefixOptions.append(option);
+        }
+      }
+
+      function applyChannelSettings(nextSettings, nextAvailablePrefixes) {
+        if (Array.isArray(nextAvailablePrefixes)) {
+          availableChannelPrefixes = [...nextAvailablePrefixes];
+        }
+
         channelSettings = {
           costThreshold: Number(nextSettings.costThreshold) || 0,
           periodDays: Math.max(1, Number(nextSettings.periodDays) || 30),
           prefixes: Array.isArray(nextSettings.prefixes)
-            ? [...nextSettings.prefixes]
+            ? nextSettings.prefixes.filter((prefix) =>
+                availableChannelPrefixes.includes(prefix),
+              )
             : [],
         };
         channelThresholdInput.value = String(channelSettings.costThreshold);
         channelPeriodInput.value = String(channelSettings.periodDays);
-        channelPrefixesInput.value = channelSettings.prefixes.join("\n");
+        renderChannelPrefixOptions();
       }
 
       async function loadChannelSettings() {
         const payload = await getJson("/api/settings");
-        applyChannelSettings(payload.channelSettings || {});
+        applyChannelSettings(
+          payload.channelSettings || {},
+          payload.availableChannelPrefixes,
+        );
       }
 
       function openSettingsDialog() {
         channelThresholdInput.value = String(channelSettings.costThreshold);
         channelPeriodInput.value = String(channelSettings.periodDays);
-        channelPrefixesInput.value = channelSettings.prefixes.join("\n");
+        renderChannelPrefixOptions();
         settingsStatus.textContent = "";
         settingsDialog.hidden = false;
-        channelThresholdInput.focus();
+        channelThresholdInput.focus({ preventScroll: true });
+        settingsDialog.querySelector(".dialog-body").scrollTop = 0;
       }
 
       function closeSettingsDialog() {
@@ -1790,6 +1924,7 @@
         clientOptions.innerHTML = "";
 
         if (clients.length === 0) {
+          tokenField.hidden = false;
           clientField.hidden = true;
           loadReportButton.hidden = true;
           loadClientsButton.hidden = false;
@@ -1800,6 +1935,7 @@
           return;
         }
 
+        tokenField.hidden = true;
         clientField.hidden = false;
         loadClientsButton.hidden = true;
         loadReportButton.hidden = true;
@@ -2979,13 +3115,16 @@
             channelSettings: {
               costThreshold: Number(channelThresholdInput.value),
               periodDays: Number(channelPeriodInput.value),
-              prefixes: channelPrefixesInput.value
-                .split(/\r?\n/)
-                .map((prefix) => prefix.trim())
-                .filter(Boolean),
+              prefixes: Array.from(
+                channelPrefixOptions.querySelectorAll('input[type="checkbox"]:checked'),
+                (checkbox) => checkbox.value,
+              ),
             },
           });
-          applyChannelSettings(payload.channelSettings || {});
+          applyChannelSettings(
+            payload.channelSettings || {},
+            payload.availableChannelPrefixes,
+          );
           invalidateChannelChecks();
           closeSettingsDialog();
           setStatus(
