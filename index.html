@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>bm-blocked</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=1.1.0" />
+    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico?v=1.1.0" />
     <meta name="theme-color" content="#f5f5f7" />
     <script>
       try {
@@ -287,6 +289,50 @@
         font-size: 13px;
       }
 
+      .dialog-panel-wide {
+        width: min(100%, 680px);
+      }
+
+      .dialog-body {
+        padding: 0 var(--space-8) var(--space-5);
+        overflow: auto;
+      }
+
+      .dialog-copy {
+        margin: 0 0 var(--space-4);
+        color: var(--text-secondary);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .settings-fields {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-4);
+      }
+
+      .settings-prefixes {
+        grid-column: 1 / -1;
+      }
+
+      .settings-button {
+        font-size: 18px;
+        line-height: 1;
+      }
+
+      .preview-table {
+        min-width: 560px;
+        font-size: 13px;
+      }
+
+      .preview-skipped {
+        margin: var(--space-4) 0 0;
+        padding-left: var(--space-6);
+        color: var(--text-secondary);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
       .app-header {
         position: sticky;
         z-index: 30;
@@ -398,14 +444,33 @@
 
       #postTableActions {
         justify-content: space-between;
-        align-items: flex-start;
+        align-items: center;
+        flex-wrap: nowrap;
+        gap: 8px;
         margin-top: var(--space-3);
+        padding-bottom: 2px;
+        overflow-x: auto;
       }
 
       .action-group {
         display: flex;
         flex-wrap: wrap;
         gap: var(--space-3);
+      }
+
+      #postTableActions .action-group {
+        width: auto;
+        flex: 0 0 auto;
+        flex-wrap: nowrap;
+        gap: 8px;
+      }
+
+      #postTableActions button {
+        width: auto;
+        min-height: var(--control-height);
+        padding: 0 14px;
+        font-size: 13px;
+        white-space: nowrap;
       }
 
       .action-group-right {
@@ -429,7 +494,8 @@
 
       button,
       input,
-      select {
+      select,
+      textarea {
         font: inherit;
         letter-spacing: 0;
       }
@@ -470,7 +536,8 @@
       }
 
       input,
-      select {
+      select,
+      textarea {
         width: 100%;
         min-height: var(--control-height);
         border: 1px solid var(--line);
@@ -491,13 +558,21 @@
         padding: 0 38px 0 14px;
       }
 
+      textarea {
+        min-height: 128px;
+        padding: 10px 14px;
+        resize: vertical;
+        line-height: 1.45;
+      }
+
       input::placeholder {
         color: var(--text-tertiary);
         opacity: 1;
       }
 
       input:disabled,
-      select:disabled {
+      select:disabled,
+      textarea:disabled {
         border-color: var(--line-soft);
         background: var(--surface-subtle);
         color: var(--text-tertiary);
@@ -505,7 +580,8 @@
       }
 
       input:focus-visible,
-      select:focus-visible {
+      select:focus-visible,
+      textarea:focus-visible {
         outline: none;
         border-color: var(--accent);
         box-shadow: 0 0 0 4px var(--focus);
@@ -558,6 +634,38 @@
         border-color: var(--success-line);
         background: var(--success-soft);
         color: var(--success);
+      }
+
+      .check-progress {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: var(--space-3) var(--space-4);
+        margin: calc(var(--space-5) * -1) 0 var(--space-5);
+        padding: 12px;
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius-md);
+        background: var(--surface-subtle);
+      }
+
+      .check-progress-copy {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--space-3);
+        color: var(--text-secondary);
+        font-size: 13px;
+      }
+
+      .check-progress progress {
+        width: 100%;
+        height: 8px;
+        grid-column: 1;
+        accent-color: var(--accent);
+      }
+
+      .check-progress button {
+        grid-column: 2;
+        grid-row: 1 / span 2;
       }
 
       .summary {
@@ -676,6 +784,23 @@
         box-shadow: none;
       }
 
+      .limit-value {
+        display: block;
+        font-weight: 650;
+      }
+
+      .limit-free {
+        display: block;
+        margin-top: 2px;
+        color: var(--text-secondary);
+        font-size: 11px;
+      }
+
+      .limit-low .limit-value,
+      .limit-full .limit-value {
+        color: var(--danger);
+      }
+
       .unavailable-list-cell {
         text-align: left;
         background: var(--surface-subtle);
@@ -697,6 +822,12 @@
       .unavailable-meta {
         color: var(--text-secondary);
         font-size: 12px;
+      }
+
+      .partial-result {
+        color: var(--text-secondary);
+        font-size: 11px;
+        margin-left: 4px;
       }
 
       .empty {
@@ -775,6 +906,24 @@
 
         .summary {
           grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .settings-fields {
+          grid-template-columns: 1fr;
+        }
+
+        .settings-prefixes {
+          grid-column: auto;
+        }
+
+        .check-progress {
+          grid-template-columns: 1fr;
+        }
+
+        .check-progress button {
+          width: 100%;
+          grid-column: 1;
+          grid-row: auto;
         }
 
         .actions button,
@@ -875,10 +1024,90 @@
       </div>
     </section>
 
+    <section
+      id="settingsDialog"
+      class="update-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settingsHeading"
+      hidden
+    >
+      <form id="settingsForm" class="update-panel">
+        <div class="update-heading">
+          <h2 id="settingsHeading">Настройки каналов</h2>
+          <p>Параметры применяются ко всем проверкам на этом компьютере.</p>
+        </div>
+        <div class="dialog-body settings-fields">
+          <div class="field">
+            <label for="channelThreshold">Порог расхода, ₽ без НДС</label>
+            <input id="channelThreshold" type="number" min="0" max="1000000" step="0.01" required />
+          </div>
+          <div class="field">
+            <label for="channelPeriod">Период, дней</label>
+            <input id="channelPeriod" type="number" min="1" max="365" step="1" required />
+          </div>
+          <div class="field settings-prefixes">
+            <label for="channelPrefixes">Префиксы каналов, по одному в строке</label>
+            <textarea id="channelPrefixes" spellcheck="false" required></textarea>
+          </div>
+        </div>
+        <p id="settingsStatus" class="update-status" aria-live="polite"></p>
+        <div class="update-actions">
+          <button id="settingsCancel" class="update-later" type="button">Отмена</button>
+          <button id="settingsSave" type="submit">Сохранить</button>
+        </div>
+      </form>
+    </section>
+
+    <section
+      id="channelPreviewDialog"
+      class="update-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="channelPreviewHeading"
+      hidden
+    >
+      <div class="update-panel dialog-panel-wide">
+        <div class="update-heading">
+          <h2 id="channelPreviewHeading">Блокировка каналов</h2>
+          <p id="channelPreviewSummary"></p>
+        </div>
+        <div class="dialog-body">
+          <div class="table-wrap">
+            <table class="preview-table">
+              <thead>
+                <tr>
+                  <th>Кампания</th>
+                  <th>Лимит</th>
+                  <th>Будет добавлено</th>
+                  <th>Не поместится</th>
+                </tr>
+              </thead>
+              <tbody id="channelPreviewBody"></tbody>
+            </table>
+          </div>
+          <ul id="channelPreviewSkipped" class="preview-skipped" hidden></ul>
+        </div>
+        <div class="update-actions">
+          <button id="channelPreviewCancel" class="update-later" type="button">Отмена</button>
+          <button id="channelPreviewConfirm" type="button">Заблокировать</button>
+        </div>
+      </div>
+    </section>
+
     <header id="appHeader" class="app-header" hidden>
       <div class="app-header-inner">
         <h1>bm-blocked</h1>
         <div class="header-session">
+          <button
+            id="settingsButton"
+            class="theme-toggle settings-button"
+            type="button"
+            aria-label="Настройки каналов"
+            title="Настройки каналов"
+          >
+            ⚙
+          </button>
           <button
             class="theme-toggle"
             type="button"
@@ -942,6 +1171,15 @@
 
       <p id="status" class="status" role="status"></p>
 
+      <section id="checkProgress" class="check-progress" aria-live="polite" hidden>
+        <div class="check-progress-copy">
+          <span id="checkProgressText">Подготовка проверки...</span>
+          <span id="checkProgressEta"></span>
+        </div>
+        <progress id="checkProgressBar" max="1" value="0"></progress>
+        <button id="cancelCheck" class="update-later" type="button">Остановить</button>
+      </section>
+
       <section id="summary" class="summary" hidden>
         <div class="metric">
           <strong id="campaignCount">0</strong>
@@ -970,6 +1208,7 @@
               </th>
               <th>Рекламная кампания</th>
               <th>Количество заблокированных площадок</th>
+              <th>Лимит</th>
               <th>Каналы</th>
               <th id="unavailableWebHeader" hidden>Нерабочие web</th>
             </tr>
@@ -983,6 +1222,9 @@
           <button id="checkReport" type="button" disabled>Проверить актуальность</button>
           <button id="clearReport" type="button" class="secondary-button" hidden disabled>
             Очистить
+          </button>
+          <button id="undoAction" type="button" class="secondary-button" hidden disabled>
+            ↶ Отменить последнее действие
           </button>
         </div>
         <div class="action-group action-group-right">
@@ -1010,6 +1252,15 @@
       const workspace = document.querySelector("#workspace");
       const sessionUser = document.querySelector("#sessionUser");
       const logoutButton = document.querySelector("#logoutButton");
+      const settingsButton = document.querySelector("#settingsButton");
+      const settingsDialog = document.querySelector("#settingsDialog");
+      const settingsForm = document.querySelector("#settingsForm");
+      const settingsCancelButton = document.querySelector("#settingsCancel");
+      const settingsSaveButton = document.querySelector("#settingsSave");
+      const settingsStatus = document.querySelector("#settingsStatus");
+      const channelThresholdInput = document.querySelector("#channelThreshold");
+      const channelPeriodInput = document.querySelector("#channelPeriod");
+      const channelPrefixesInput = document.querySelector("#channelPrefixes");
       const tokenInput = document.querySelector("#token");
       const clientSelect = document.querySelector("#client");
       const clientOptions = document.querySelector("#clientOptions");
@@ -1018,11 +1269,17 @@
       const loadReportButton = document.querySelector("#loadReport");
       const checkReportButton = document.querySelector("#checkReport");
       const clearReportButton = document.querySelector("#clearReport");
+      const undoActionButton = document.querySelector("#undoAction");
       const checkChannelsButton = document.querySelector("#checkChannels");
       const blockChannelsButton = document.querySelector("#blockChannels");
       const postTableActions = document.querySelector("#postTableActions");
       const selectAllCampaigns = document.querySelector("#selectAllCampaigns");
       const statusText = document.querySelector("#status");
+      const checkProgress = document.querySelector("#checkProgress");
+      const checkProgressText = document.querySelector("#checkProgressText");
+      const checkProgressEta = document.querySelector("#checkProgressEta");
+      const checkProgressBar = document.querySelector("#checkProgressBar");
+      const cancelCheckButton = document.querySelector("#cancelCheck");
       const summary = document.querySelector("#summary");
       const campaignCount = document.querySelector("#campaignCount");
       const blockedCount = document.querySelector("#blockedCount");
@@ -1041,11 +1298,25 @@
       const updateStatus = document.querySelector("#updateStatus");
       const updateInstallButton = document.querySelector("#updateInstall");
       const updateLaterButton = document.querySelector("#updateLater");
+      const channelPreviewDialog = document.querySelector("#channelPreviewDialog");
+      const channelPreviewSummary = document.querySelector("#channelPreviewSummary");
+      const channelPreviewBody = document.querySelector("#channelPreviewBody");
+      const channelPreviewSkipped = document.querySelector("#channelPreviewSkipped");
+      const channelPreviewCancelButton = document.querySelector("#channelPreviewCancel");
+      const channelPreviewConfirmButton = document.querySelector("#channelPreviewConfirm");
 
       let clients = [];
       let currentCampaigns = [];
       let hasActualityCheck = false;
       let hasChannelCheck = false;
+      let activePlacementJobId = "";
+      let undoState = { available: false };
+      let channelSettings = {
+        costThreshold: 15,
+        periodDays: 30,
+        prefixes: ["t.me/", "max.ru/", "web.max.ru/", "vk.com/", "rutube.ru/"],
+      };
+      let channelPreviewResolver = null;
       let updatePollTimer = null;
       let displayedUpdateRevision = -1;
       const checkedCampaignIds = new Set();
@@ -1262,6 +1533,9 @@
         authStatusText.textContent = "";
         setAuthBusy(false);
         startUpdatePolling();
+        loadChannelSettings().catch((error) => {
+          setStatus(`Не удалось загрузить настройки каналов: ${error.message}`, "error");
+        });
       }
 
       function showLogin(message = "", configured = true) {
@@ -1271,6 +1545,7 @@
         workspace.hidden = true;
         sessionUser.textContent = "";
         tokenInput.value = "";
+        closeSettingsDialog();
         renderClients([]);
         resetReport();
         authStatusText.textContent = message;
@@ -1318,6 +1593,78 @@
         return response;
       }
 
+      async function getJson(url) {
+        const response = await authenticatedFetch(url, {
+          headers: { Accept: "application/json" },
+        });
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload.error || "Запрос завершился с ошибкой.");
+        }
+
+        return payload;
+      }
+
+      function applyChannelSettings(nextSettings) {
+        channelSettings = {
+          costThreshold: Number(nextSettings.costThreshold) || 0,
+          periodDays: Math.max(1, Number(nextSettings.periodDays) || 30),
+          prefixes: Array.isArray(nextSettings.prefixes)
+            ? [...nextSettings.prefixes]
+            : [],
+        };
+        channelThresholdInput.value = String(channelSettings.costThreshold);
+        channelPeriodInput.value = String(channelSettings.periodDays);
+        channelPrefixesInput.value = channelSettings.prefixes.join("\n");
+      }
+
+      async function loadChannelSettings() {
+        const payload = await getJson("/api/settings");
+        applyChannelSettings(payload.channelSettings || {});
+      }
+
+      function openSettingsDialog() {
+        channelThresholdInput.value = String(channelSettings.costThreshold);
+        channelPeriodInput.value = String(channelSettings.periodDays);
+        channelPrefixesInput.value = channelSettings.prefixes.join("\n");
+        settingsStatus.textContent = "";
+        settingsDialog.hidden = false;
+        channelThresholdInput.focus();
+      }
+
+      function closeSettingsDialog() {
+        settingsDialog.hidden = true;
+        settingsStatus.textContent = "";
+        settingsSaveButton.disabled = false;
+        settingsCancelButton.disabled = false;
+      }
+
+      function invalidateChannelChecks() {
+        currentCampaigns = currentCampaigns.map((campaign) => {
+          const { channels, channelCount, ...remainingCampaign } = campaign;
+          return remainingCampaign;
+        });
+        hasChannelCheck = false;
+
+        if (currentCampaigns.length > 0) {
+          renderReport({
+            campaigns: currentCampaigns,
+            totalCampaigns: currentCampaigns.length,
+            totalBlockedSites: currentCampaigns.reduce(
+              (sum, campaign) => sum + campaign.blockedCount,
+              0,
+            ),
+            skippedAppSites: Number(skippedAppsCount.textContent) || 0,
+            undo: undoState,
+          }, { withActualityCheck: hasActualityCheck });
+        }
+      }
+
+      function wait(milliseconds) {
+        return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+      }
+
       function notifyCheckCompletion(kind, details = {}) {
         const pageIsActive = document.visibilityState === "visible" && document.hasFocus();
 
@@ -1328,11 +1675,93 @@
         postJson("/api/desktop-notification", { kind, ...details }).catch(() => {});
       }
 
+      function formatEta(seconds) {
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          return "";
+        }
+
+        if (seconds < 60) {
+          return `осталось около ${Math.max(1, Math.round(seconds))} сек.`;
+        }
+
+        return `осталось около ${Math.max(1, Math.round(seconds / 60))} мин.`;
+      }
+
+      function updateCheckProgress(job) {
+        const progress = job.progress || {};
+        const completed = Math.max(0, Number(progress.completed) || 0);
+        const total = Math.max(completed, Number(progress.total) || 0);
+        const campaignsCompleted = Math.max(
+          0,
+          Number(progress.campaignsCompleted) || 0,
+        );
+        const totalCampaigns = Math.max(
+          campaignsCompleted,
+          Number(progress.totalCampaigns) || 0,
+        );
+        const elapsedSeconds = Math.max(
+          0,
+          (Date.now() - Number(job.startedAt || Date.now())) / 1000,
+        );
+        const etaSeconds = completed > 0 && total > completed
+          ? elapsedSeconds * (total - completed) / completed
+          : 0;
+
+        checkProgress.hidden = false;
+        checkProgressBar.max = Math.max(1, total);
+        checkProgressBar.value = completed;
+        checkProgressText.textContent = total > 0
+          ? `Площадки: ${completed} из ${total} · кампании: ${campaignsCompleted} из ${totalCampaigns}`
+          : "Получаю список площадок...";
+        checkProgressEta.textContent = job.status === "running"
+          ? formatEta(etaSeconds)
+          : "";
+        cancelCheckButton.hidden = job.status !== "running";
+        cancelCheckButton.disabled = job.cancelRequested === true;
+        cancelCheckButton.textContent = job.cancelRequested
+          ? "Останавливаю..."
+          : "Остановить";
+      }
+
+      function resetCheckProgress() {
+        const runningJobId = activePlacementJobId;
+        activePlacementJobId = "";
+
+        if (runningJobId) {
+          postJson("/api/check-placements/cancel", { jobId: runningJobId }).catch(() => {});
+        }
+
+        checkProgress.hidden = true;
+        checkProgressBar.max = 1;
+        checkProgressBar.value = 0;
+        checkProgressText.textContent = "Подготовка проверки...";
+        checkProgressEta.textContent = "";
+        cancelCheckButton.hidden = false;
+        cancelCheckButton.disabled = false;
+        cancelCheckButton.textContent = "Остановить";
+      }
+
+      function applyUndoState(nextUndoState) {
+        undoState = nextUndoState?.available
+          ? { ...nextUndoState, available: true }
+          : { available: false };
+        undoActionButton.hidden = !undoState.available;
+        undoActionButton.disabled = !undoState.available;
+        undoActionButton.textContent = undoState.action === "clear"
+          ? "↶ Отменить очистку"
+          : "↶ Отменить блокировку каналов";
+        undoActionButton.title = undoState.action === "clear"
+          ? "Отменить последнюю очистку"
+          : "Отменить последнюю блокировку каналов";
+      }
+
       function resetReport() {
         currentCampaigns = [];
         hasActualityCheck = false;
         hasChannelCheck = false;
         checkedCampaignIds.clear();
+        resetCheckProgress();
+        applyUndoState({ available: false });
         selectAllCampaigns.checked = false;
         selectAllCampaigns.indeterminate = false;
         postTableActions.hidden = true;
@@ -1413,6 +1842,9 @@
 
       function renderReport(payload, options = {}) {
         currentCampaigns = payload.campaigns || [];
+        if (payload.undo) {
+          applyUndoState(payload.undo);
+        }
         hasActualityCheck = hasActualityCheck || Boolean(options.withActualityCheck);
         hasChannelCheck = hasChannelCheck || Boolean(options.withChannelCheck);
         reportBody.innerHTML = "";
@@ -1443,6 +1875,7 @@
           const checkbox = document.createElement("input");
           const nameCell = document.createElement("td");
           const countCell = document.createElement("td");
+          const limitCell = createLimitCell(campaign);
 
           selectCell.className = "select-column";
           checkbox.type = "checkbox";
@@ -1464,7 +1897,13 @@
           selectCell.append(checkbox);
           nameCell.textContent = campaign.campaignName;
           countCell.textContent = String(campaign.blockedCount);
-          row.append(selectCell, nameCell, countCell, createChannelCell(row, campaign));
+          row.append(
+            selectCell,
+            nameCell,
+            countCell,
+            limitCell,
+            createChannelCell(row, campaign),
+          );
 
           if (hasActualityCheck) {
             row.append(createUnavailableCell(row, campaign, "web"));
@@ -1472,6 +1911,24 @@
 
           reportBody.append(row);
         }
+      }
+
+      function createLimitCell(campaign) {
+        const cell = document.createElement("td");
+        const value = document.createElement("span");
+        const free = document.createElement("span");
+        const limit = Number(campaign.blockedLimit) || 1000;
+        const blocked = Math.max(0, Number(campaign.blockedCount) || 0);
+        const available = Math.max(0, limit - blocked);
+
+        value.className = "limit-value";
+        value.textContent = `${blocked} / ${limit}`;
+        free.className = "limit-free";
+        free.textContent = `свободно ${available}`;
+        cell.classList.toggle("limit-full", available === 0);
+        cell.classList.toggle("limit-low", available > 0 && available <= 50);
+        cell.append(value, free);
+        return cell;
       }
 
       function createChannelCell(row, campaign) {
@@ -1507,9 +1964,19 @@
         const count = document.createElement("span");
         const sites = getUnavailableSitesByType(campaign, type);
         const isChecked = Array.isArray(campaign.unavailableSites);
+        const isPartial = isChecked && campaign.actualityComplete === false;
 
         count.textContent = isChecked ? String(sites.length) : "—";
         cell.append(count);
+
+        if (isPartial) {
+          const partialLabel = document.createElement("span");
+
+          partialLabel.className = "partial-result";
+          partialLabel.textContent = "частично";
+          cell.title = "Проверка этой кампании была остановлена до завершения.";
+          cell.append(partialLabel);
+        }
 
         if (sites.length > 0) {
           const helpButton = document.createElement("button");
@@ -1532,9 +1999,13 @@
 
       function updateCheckButtonState() {
         const selectedCount = checkedCampaignIds.size;
-        checkReportButton.disabled = selectedCount === 0;
+        const checkIsRunning = Boolean(activePlacementJobId);
+
+        checkReportButton.disabled = selectedCount === 0 || checkIsRunning;
         checkReportButton.textContent =
-          selectedCount > 0
+          checkIsRunning
+            ? "Проверка..."
+            : selectedCount > 0
             ? `Проверить актуальность (${selectedCount})`
             : "Проверить актуальность";
       }
@@ -1553,17 +2024,21 @@
         const channelsToBlock = selectedCampaigns.reduce(
           (sum, campaign) =>
             sum + (campaign.channels || []).filter(
-              (channel) => !channel.isBlocked && !channel.skippedByLimit,
+              (channel) => !channel.isBlocked,
             ).length,
           0,
         );
+        const channelsThatFit = allSelectedChecked
+          ? buildChannelBlockPreview(selectedCampaigns).totalSelected
+          : 0;
 
-        checkChannelsButton.disabled = selectedCount === 0;
+        checkChannelsButton.disabled = selectedCount === 0 || Boolean(activePlacementJobId);
         checkChannelsButton.textContent = selectedCount > 0
           ? `Проверить каналы (tg, max и т.д.) (${selectedCount})`
           : "Проверить каналы (tg, max и т.д.)";
         blockChannelsButton.hidden = !hasChannelCheck;
-        blockChannelsButton.disabled = !allSelectedChecked || channelsToBlock === 0;
+        blockChannelsButton.disabled =
+          Boolean(activePlacementJobId) || !allSelectedChecked || channelsThatFit === 0;
 
         if (selectedCount === 0) {
           blockChannelsButton.title = "Выберите кампании.";
@@ -1573,13 +2048,97 @@
         } else if (channelsToBlock === 0) {
           blockChannelsButton.title =
             "В выбранных кампаниях нет новых каналов для блокировки.";
+        } else if (channelsThatFit === 0) {
+          blockChannelsButton.title =
+            "В выбранных кампаниях заполнен лимит запрещенных площадок.";
         } else {
           blockChannelsButton.title = "";
         }
       }
 
+      function buildChannelBlockPreview(campaigns) {
+        const previewCampaigns = campaigns.map((campaign) => {
+          const limit = Number(campaign.blockedLimit) || 1000;
+          const blockedCount = Math.max(0, Number(campaign.blockedCount) || 0);
+          const availableSlots = Math.max(0, limit - blockedCount);
+          const candidates = [...(campaign.channels || [])]
+            .filter((channel) => !channel.isBlocked)
+            .sort((left, right) =>
+              Number(right.cost) - Number(left.cost) ||
+              left.placement.localeCompare(right.placement, "ru"),
+            );
+
+          return {
+            campaignId: campaign.campaignId,
+            campaignName: campaign.campaignName,
+            limit,
+            blockedCount,
+            availableSlots,
+            selected: candidates.slice(0, availableSlots),
+            skipped: candidates.slice(availableSlots),
+          };
+        });
+
+        return {
+          campaigns: previewCampaigns,
+          totalSelected: previewCampaigns.reduce(
+            (sum, campaign) => sum + campaign.selected.length,
+            0,
+          ),
+          totalSkipped: previewCampaigns.reduce(
+            (sum, campaign) => sum + campaign.skipped.length,
+            0,
+          ),
+        };
+      }
+
+      function closeChannelPreview(confirmed) {
+        channelPreviewDialog.hidden = true;
+        const resolver = channelPreviewResolver;
+        channelPreviewResolver = null;
+        resolver?.(confirmed);
+      }
+
+      function showChannelBlockPreview(preview) {
+        channelPreviewBody.innerHTML = "";
+        channelPreviewSkipped.innerHTML = "";
+        channelPreviewSummary.textContent = preview.totalSkipped > 0
+          ? `Будет добавлено ${preview.totalSelected}. Не поместится из-за лимита: ${preview.totalSkipped}.`
+          : `Будет добавлено каналов: ${preview.totalSelected}.`;
+
+        for (const campaign of preview.campaigns) {
+          const row = document.createElement("tr");
+          const nameCell = document.createElement("td");
+          const limitCell = document.createElement("td");
+          const selectedCell = document.createElement("td");
+          const skippedCell = document.createElement("td");
+
+          nameCell.textContent = campaign.campaignName;
+          limitCell.textContent = `${campaign.blockedCount} / ${campaign.limit}`;
+          selectedCell.textContent = String(campaign.selected.length);
+          skippedCell.textContent = String(campaign.skipped.length);
+          row.append(nameCell, limitCell, selectedCell, skippedCell);
+          channelPreviewBody.append(row);
+
+          for (const channel of campaign.skipped) {
+            const item = document.createElement("li");
+            item.textContent = `${campaign.campaignName}: ${channel.placement} — ${formatChannelCost(channel.cost)} ₽ без НДС`;
+            channelPreviewSkipped.append(item);
+          }
+        }
+
+        channelPreviewSkipped.hidden = preview.totalSkipped === 0;
+        channelPreviewConfirmButton.disabled = preview.totalSelected === 0;
+        channelPreviewDialog.hidden = false;
+        channelPreviewConfirmButton.focus();
+
+        return new Promise((resolve) => {
+          channelPreviewResolver = resolve;
+        });
+      }
+
       function campaignHasActualityCheck(campaign) {
-        return Array.isArray(campaign.unavailableSites);
+        return campaign.actualityComplete === true;
       }
 
       function updateClearButtonState() {
@@ -1595,7 +2154,7 @@
         );
 
         clearReportButton.disabled =
-          !allSelectedChecked || unavailableCount === 0;
+          Boolean(activePlacementJobId) || !allSelectedChecked || unavailableCount === 0;
 
         if (selectedCampaigns.length === 0) {
           clearReportButton.title = "Выберите кампании.";
@@ -1687,10 +2246,10 @@
         const list = document.createElement("ul");
 
         detailsRow.dataset.detailsFor = detailsKey;
-        detailsCell.colSpan = 4 + (hasActualityCheck ? 1 : 0);
+        detailsCell.colSpan = 5 + (hasActualityCheck ? 1 : 0);
         detailsCell.className = "unavailable-list-cell";
         counter.className = "unavailable-meta";
-        counter.textContent = `Каналов с расходом больше 15 ₽ без НДС: ${channels.length}.`;
+        counter.textContent = `Каналов с расходом больше ${formatChannelCost(channelSettings.costThreshold)} ₽ без НДС: ${channels.length}.`;
         list.className = "unavailable-list";
 
         for (const channel of channels) {
@@ -1735,7 +2294,7 @@
         const allSites = getUnavailableSitesByType(campaign, type).sort((left, right) => {
           return left.placement.localeCompare(right.placement, "ru");
         });
-        const columnCount = 4 + (hasActualityCheck ? 1 : 0);
+        const columnCount = 5 + (hasActualityCheck ? 1 : 0);
 
         detailsRow.dataset.detailsFor = detailsKey;
         detailsCell.colSpan = columnCount;
@@ -1881,11 +2440,34 @@
         loadReportButton.disabled = true;
 
         try {
-          const payload = await postJson("/api/check-placements", {
+          const startedJob = await postJson("/api/check-placements/start", {
             token,
             clientLogin: client.login,
             campaignIds,
           });
+          activePlacementJobId = startedJob.jobId;
+          updateCheckProgress(startedJob);
+
+          let finishedJob = startedJob;
+
+          while (finishedJob.status === "running") {
+            await wait(400);
+
+            if (activePlacementJobId !== startedJob.jobId) {
+              throw new Error("Проверка была прервана сменой клиента или токена.");
+            }
+
+            finishedJob = await getJson(
+              `/api/check-placements/status?jobId=${encodeURIComponent(startedJob.jobId)}`,
+            );
+            updateCheckProgress(finishedJob);
+          }
+
+          if (finishedJob.status === "error") {
+            throw new Error(finishedJob.error || "Проверка завершилась ошибкой.");
+          }
+
+          const payload = finishedJob.result || {};
           const mergedCampaigns = mergeCheckedCampaigns(payload.campaigns || []);
           renderReport({
             campaigns: mergedCampaigns,
@@ -1896,22 +2478,57 @@
               0,
             ),
             skippedAppSites: payload.skippedAppSites || 0,
+            undo: undoState,
           }, { withActualityCheck: true });
-          setStatus(
-            `Проверка завершена. Проверено кампаний: ${payload.totalCampaigns || 0}.`,
-            "success",
-          );
-          notifyCheckCompletion("success", {
-            campaignCount: payload.totalCampaigns || 0,
-          });
+          const completedCampaigns = (payload.campaigns || []).filter(
+            campaignHasActualityCheck,
+          ).length;
+
+          if (finishedJob.status === "cancelled") {
+            setStatus(
+              `Проверка остановлена. Полностью проверено кампаний: ${completedCampaigns} из ${payload.totalCampaigns || campaignIds.length}. Частичные результаты сохранены.`,
+              "success",
+            );
+          } else {
+            setStatus(
+              `Проверка завершена. Проверено кампаний: ${payload.totalCampaigns || 0}.`,
+              "success",
+            );
+            notifyCheckCompletion("success", {
+              campaignCount: payload.totalCampaigns || 0,
+            });
+          }
         } catch (error) {
           setStatus(error.message, "error");
           notifyCheckCompletion("error", { error: error.message });
         } finally {
+          activePlacementJobId = "";
+          cancelCheckButton.hidden = true;
           setBusy(checkReportButton, false, "Проверить актуальность");
           updateCheckButtonState();
           updateChannelButtonsState();
+          updateClearButtonState();
           loadReportButton.disabled = false;
+        }
+      });
+
+      cancelCheckButton.addEventListener("click", async () => {
+        if (!activePlacementJobId) {
+          return;
+        }
+
+        cancelCheckButton.disabled = true;
+        cancelCheckButton.textContent = "Останавливаю...";
+
+        try {
+          const job = await postJson("/api/check-placements/cancel", {
+            jobId: activePlacementJobId,
+          });
+          updateCheckProgress(job);
+        } catch (error) {
+          setStatus(`Не удалось остановить проверку: ${error.message}`, "error");
+          cancelCheckButton.disabled = false;
+          cancelCheckButton.textContent = "Остановить";
         }
       });
 
@@ -1931,7 +2548,7 @@
 
         const campaignIds = Array.from(checkedCampaignIds);
 
-        setStatus("Проверяю расходы по каналам за последние 30 дней...");
+        setStatus(`Проверяю расходы по каналам за последние ${channelSettings.periodDays} дней...`);
         setBusy(checkChannelsButton, true, "Проверка каналов...");
         checkReportButton.disabled = true;
         clearReportButton.disabled = true;
@@ -1942,6 +2559,11 @@
             token,
             clientLogin: client.login,
             campaignIds,
+          });
+          applyChannelSettings({
+            costThreshold: payload.costThreshold,
+            periodDays: payload.periodDays,
+            prefixes: payload.prefixes,
           });
           const mergedCampaigns = mergeCheckedCampaigns(payload.campaigns || []);
           renderReport({
@@ -1956,9 +2578,10 @@
               0,
             ),
             skippedAppSites: Number(skippedAppsCount.textContent) || 0,
+            undo: undoState,
           }, { withChannelCheck: true });
           setStatus(
-            `Проверка каналов завершена. Найдено площадок с расходом больше 15 ₽ без НДС: ${payload.totalChannels || 0}.`,
+            `Проверка каналов завершена. Найдено площадок с расходом больше ${formatChannelCost(payload.costThreshold)} ₽ без НДС за ${payload.periodDays} дней: ${payload.totalChannels || 0}.`,
             "success",
           );
           notifyCheckCompletion("success", {
@@ -2069,6 +2692,7 @@
               0,
             ),
             skippedAppSites: Number(skippedAppsCount.textContent) || 0,
+            undo: payload.undo,
           }, { withActualityCheck: true });
 
           const failedCount = (payload.failedCampaigns || []).length;
@@ -2113,20 +2737,26 @@
           return;
         }
 
-        const campaignsToBlock = selectedCampaigns
-          .map((campaign) => ({
-            campaignId: campaign.campaignId,
-            channels: campaign.channels.filter(
-              (channel) => !channel.isBlocked && !channel.skippedByLimit,
-            ),
-          }))
-          .filter((campaign) => campaign.channels.length > 0);
+        const preview = buildChannelBlockPreview(selectedCampaigns);
 
-        if (campaignsToBlock.length === 0) {
+        if (preview.totalSelected === 0) {
           setStatus("В выбранных кампаниях нет новых каналов для блокировки.", "error");
           updateChannelButtonsState();
           return;
         }
+
+        const confirmed = await showChannelBlockPreview(preview);
+
+        if (!confirmed) {
+          return;
+        }
+
+        const campaignsToBlock = preview.campaigns
+          .map((campaign) => ({
+            campaignId: campaign.campaignId,
+            channels: campaign.selected,
+          }))
+          .filter((campaign) => campaign.channels.length > 0);
 
         setStatus("Добавляю найденные каналы в запрещенные площадки...");
         setBusy(blockChannelsButton, true, "Блокировка...");
@@ -2200,6 +2830,7 @@
               0,
             ),
             skippedAppSites: Number(skippedAppsCount.textContent) || 0,
+            undo: payload.undo,
           }, { withChannelCheck: true });
 
           const failedCount = (payload.failedCampaigns || []).length;
@@ -2228,6 +2859,71 @@
             false,
             "Заблокировать каналы (tg, max и т.д.)",
           );
+          updateCheckButtonState();
+          updateChannelButtonsState();
+          updateClearButtonState();
+          loadReportButton.disabled = false;
+        }
+      });
+
+      channelPreviewCancelButton.addEventListener("click", () => {
+        closeChannelPreview(false);
+      });
+
+      channelPreviewConfirmButton.addEventListener("click", () => {
+        closeChannelPreview(true);
+      });
+
+      undoActionButton.addEventListener("click", async () => {
+        const token = tokenInput.value.trim();
+        const client = getSelectedClient();
+
+        if (!token || !client || !undoState.available) {
+          return;
+        }
+
+        const actionName = undoState.action === "clear"
+          ? "очистку"
+          : "блокировку каналов";
+
+        if (!window.confirm(`Отменить последнюю ${actionName} и восстановить прежние списки площадок?`)) {
+          return;
+        }
+
+        setStatus("Восстанавливаю прежние списки запрещенных площадок...");
+        setBusy(undoActionButton, true, "Восстановление...");
+        checkReportButton.disabled = true;
+        checkChannelsButton.disabled = true;
+        clearReportButton.disabled = true;
+        blockChannelsButton.disabled = true;
+        loadReportButton.disabled = true;
+
+        try {
+          const undoPayload = await postJson("/api/undo", {
+            token,
+            clientLogin: client.login,
+          });
+          const reportPayload = await postJson("/api/blocked-placements", {
+            token,
+            clientLogin: client.login,
+          });
+          checkedCampaignIds.clear();
+          hasActualityCheck = false;
+          hasChannelCheck = false;
+          renderReport(reportPayload);
+
+          const failedCount = (undoPayload.failedCampaigns || []).length;
+          setStatus(
+            failedCount > 0
+              ? `Восстановлено кампаний: ${undoPayload.totalRestoredCampaigns || 0}. Не удалось восстановить: ${failedCount}.`
+              : `Последнее действие отменено. Восстановлено кампаний: ${undoPayload.totalRestoredCampaigns || 0}.`,
+            failedCount > 0 ? "error" : "success",
+          );
+        } catch (error) {
+          setStatus(error.message, "error");
+        } finally {
+          setBusy(undoActionButton, false, "↶ Отменить последнее действие");
+          applyUndoState(undoState);
           updateCheckButtonState();
           updateChannelButtonsState();
           updateClearButtonState();
@@ -2268,6 +2964,39 @@
         loadClientsButton.hidden = false;
         resetReport();
         setStatus("");
+      });
+
+      settingsButton.addEventListener("click", openSettingsDialog);
+      settingsCancelButton.addEventListener("click", closeSettingsDialog);
+      settingsForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        settingsSaveButton.disabled = true;
+        settingsCancelButton.disabled = true;
+        settingsStatus.textContent = "Сохраняю...";
+
+        try {
+          const payload = await postJson("/api/settings", {
+            channelSettings: {
+              costThreshold: Number(channelThresholdInput.value),
+              periodDays: Number(channelPeriodInput.value),
+              prefixes: channelPrefixesInput.value
+                .split(/\r?\n/)
+                .map((prefix) => prefix.trim())
+                .filter(Boolean),
+            },
+          });
+          applyChannelSettings(payload.channelSettings || {});
+          invalidateChannelChecks();
+          closeSettingsDialog();
+          setStatus(
+            "Настройки каналов сохранены. Для актуальных данных повторите проверку каналов.",
+            "success",
+          );
+        } catch (error) {
+          settingsStatus.textContent = error.message;
+          settingsSaveButton.disabled = false;
+          settingsCancelButton.disabled = false;
+        }
       });
 
       async function performUpdateAction(action) {

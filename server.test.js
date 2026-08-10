@@ -5,8 +5,10 @@ process.env.BM_BLOCKED_DISABLE_SERVER = "1";
 
 const {
   buildChannelReportDefinition,
+  getLastDaysRange,
   getLast30DaysRange,
   normalizeChannelPlacement,
+  normalizeChannelSettings,
   parseChannelPerformanceReport,
   selectChannelsForAvailableSlots,
 } = await import("./server.js");
@@ -100,4 +102,31 @@ test("builds an inclusive 30-day Moscow report range", () => {
     dateFrom: "2026-07-08",
     dateTo: "2026-08-06",
   });
+});
+
+test("builds a configurable inclusive report range", () => {
+  assert.deepEqual(getLastDaysRange(7, new Date("2026-08-06T12:00:00Z")), {
+    dateFrom: "2026-07-31",
+    dateTo: "2026-08-06",
+  });
+});
+
+test("uses a custom threshold and custom channel prefixes", () => {
+  const settings = normalizeChannelSettings({
+    costThreshold: 25.5,
+    periodDays: 14,
+    prefixes: ["example.ru/channels/", "t.me/"],
+  });
+  const campaigns = [{ campaignId: "101", blockedSites: [] }];
+  const report = [
+    "101\texample.ru/channels/working\t25.51",
+    "101\texample.ru/other\t100.00",
+    "101\tt.me/exact-threshold\t25.50",
+  ].join("\n");
+  const parsed = parseChannelPerformanceReport(report, campaigns, settings);
+
+  assert.deepEqual(
+    parsed.get("101").map((channel) => channel.placement),
+    ["example.ru/channels/working"],
+  );
 });

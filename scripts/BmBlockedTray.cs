@@ -18,8 +18,8 @@ using Microsoft.Toolkit.Uwp.Notifications;
 [assembly: System.Reflection.AssemblyDescription("Проверка заблокированных площадок Яндекс Директа")]
 [assembly: System.Reflection.AssemblyCompany("Brandmaker")]
 [assembly: System.Reflection.AssemblyProduct("bm-blocked")]
-[assembly: System.Reflection.AssemblyVersion("1.0.6.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.6.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.0.0")]
 
 namespace BmBlocked
 {
@@ -413,6 +413,9 @@ namespace BmBlocked
                 "System.ValueTuple.dll",
                 "server.js",
                 "index.html",
+                "app-manifest.json",
+                "favicon.ico",
+                "favicon.png",
                 Path.Combine("runtime", "node.exe")
             };
 
@@ -543,6 +546,12 @@ namespace BmBlocked
                 updateRoot.FullName,
                 "backup-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss"));
             var createdFiles = new List<string>();
+            var previousFiles = ReadManifestFiles(
+                Path.Combine(targetRoot, "app-manifest.json"),
+                false);
+            var nextFiles = ReadManifestFiles(
+                Path.Combine(stagingRoot, "app-manifest.json"),
+                true);
 
             if (!Directory.Exists(stagingRoot))
             {
@@ -557,7 +566,7 @@ namespace BmBlocked
                 {
                     var relativePath = sourcePath.Substring(stagingRoot.Length);
 
-                    if (String.Equals(relativePath, "auth-config.json", StringComparison.OrdinalIgnoreCase))
+                    if (IsProtectedDataFile(relativePath))
                     {
                         continue;
                     }
@@ -595,6 +604,33 @@ namespace BmBlocked
 
                     File.Copy(sourcePath, targetPath, true);
                 }
+
+                foreach (var relativePath in previousFiles)
+                {
+                    if (nextFiles.Contains(relativePath) || IsProtectedDataFile(relativePath))
+                    {
+                        continue;
+                    }
+
+                    var targetPath = GetPathInsideRoot(targetRoot, relativePath);
+
+                    if (!File.Exists(targetPath))
+                    {
+                        continue;
+                    }
+
+                    var backupPath = Path.Combine(backupRoot, relativePath);
+                    var backupParent = Path.GetDirectoryName(backupPath);
+
+                    if (!String.IsNullOrEmpty(backupParent))
+                    {
+                        Directory.CreateDirectory(backupParent);
+                    }
+
+                    File.Copy(targetPath, backupPath, true);
+                    File.Delete(targetPath);
+                    DeleteEmptyParents(Path.GetDirectoryName(targetPath), targetRoot);
+                }
             }
             catch
             {
@@ -619,6 +655,118 @@ namespace BmBlocked
                 }
 
                 throw;
+            }
+        }
+
+        private static bool IsProtectedDataFile(string relativePath)
+        {
+            var normalizedPath = (relativePath ?? "")
+                .Replace('/', Path.DirectorySeparatorChar)
+                .TrimStart(Path.DirectorySeparatorChar);
+
+            return
+                String.Equals(normalizedPath, "auth-config.json", StringComparison.OrdinalIgnoreCase) ||
+                String.Equals(normalizedPath, "settings.json", StringComparison.OrdinalIgnoreCase) ||
+                String.Equals(normalizedPath, "last-operation.json", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static HashSet<string> ReadManifestFiles(
+            string manifestPath,
+            bool required)
+        {
+            try
+            {
+                if (!File.Exists(manifestPath))
+                {
+                    if (required)
+                    {
+                        throw new InvalidDataException("В обновлении отсутствует app-manifest.json.");
+                    }
+
+                    return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                }
+
+                var serializer = new JavaScriptSerializer();
+                var payload = serializer.DeserializeObject(
+                    File.ReadAllText(manifestPath, Encoding.UTF8)) as Dictionary<string, object>;
+                var rawFiles = payload != null && payload.ContainsKey("files")
+                    ? payload["files"] as object[]
+                    : null;
+
+                if (rawFiles == null || rawFiles.Length == 0)
+                {
+                    throw new InvalidDataException("app-manifest.json не содержит список файлов.");
+                }
+
+                var manifestRoot = Path.GetDirectoryName(manifestPath)
+                    .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var rawFile in rawFiles)
+                {
+                    var relativePath = Convert.ToString(rawFile)
+                        .Replace('/', Path.DirectorySeparatorChar)
+                        .TrimStart(Path.DirectorySeparatorChar);
+
+                    if (String.IsNullOrWhiteSpace(relativePath))
+                    {
+                        throw new InvalidDataException("app-manifest.json содержит пустой путь.");
+                    }
+
+                    GetPathInsideRoot(manifestRoot, relativePath);
+                    files.Add(relativePath);
+                }
+
+                return files;
+            }
+            catch
+            {
+                if (required)
+                {
+                    throw;
+                }
+
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        private static string GetPathInsideRoot(string rootPath, string relativePath)
+        {
+            var normalizedRoot = Path.GetFullPath(rootPath)
+                .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var fullPath = Path.GetFullPath(Path.Combine(normalizedRoot, relativePath));
+
+            if (!fullPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("Некорректный путь в app-manifest.json.");
+            }
+
+            return fullPath;
+        }
+
+        private static void DeleteEmptyParents(string directoryPath, string rootPath)
+        {
+            var normalizedRoot = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar);
+            var currentDirectory = directoryPath;
+
+            while (!String.IsNullOrEmpty(currentDirectory))
+            {
+                var normalizedCurrent = Path.GetFullPath(currentDirectory)
+                    .TrimEnd(Path.DirectorySeparatorChar);
+
+                if (
+                    String.Equals(normalizedCurrent, normalizedRoot, StringComparison.OrdinalIgnoreCase) ||
+                    !normalizedCurrent.StartsWith(
+                        normalizedRoot + Path.DirectorySeparatorChar,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    Directory.GetFileSystemEntries(normalizedCurrent).Length > 0
+                )
+                {
+                    break;
+                }
+
+                Directory.Delete(normalizedCurrent);
+                currentDirectory = Path.GetDirectoryName(normalizedCurrent);
             }
         }
 
@@ -654,6 +802,10 @@ namespace BmBlocked
         private readonly System.Threading.Timer updateTimer;
         private readonly Thread notificationThread;
         private readonly object notificationPipeLock = new object();
+        private readonly object serverLogLock = new object();
+        private readonly string serverLogPath = Path.Combine(
+            Path.GetTempPath(),
+            "bm-blocked-server.log");
         private NamedPipeServerStream activeNotificationPipe;
         private Action balloonClickAction;
         private Process serverProcess;
@@ -681,7 +833,8 @@ namespace BmBlocked
 
             trayIcon = new NotifyIcon
             {
-                Icon = SystemIcons.Application,
+                Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ??
+                    SystemIcons.Application,
                 Text = "bm-blocked",
                 Visible = true,
                 ContextMenuStrip = BuildMenu()
@@ -1110,6 +1263,19 @@ namespace BmBlocked
 
             try
             {
+                NormalizePathEnvironmentVariable();
+
+                try
+                {
+                    File.WriteAllText(
+                        serverLogPath,
+                        "bm-blocked server start " + DateTime.Now.ToString("O") + Environment.NewLine,
+                        Encoding.UTF8);
+                }
+                catch
+                {
+                }
+
                 serverProcess = new Process
                 {
                     StartInfo = new ProcessStartInfo
@@ -1118,6 +1284,8 @@ namespace BmBlocked
                         Arguments = "\"" + serverPath + "\"",
                         WorkingDirectory = appDirectory,
                         UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
                         CreateNoWindow = true,
                         WindowStyle = ProcessWindowStyle.Hidden
                     },
@@ -1129,16 +1297,73 @@ namespace BmBlocked
                     notificationPipeName;
                 serverProcess.StartInfo.EnvironmentVariables["BM_BLOCKED_INTERNAL_TOKEN"] =
                     internalToken;
+                serverProcess.OutputDataReceived += delegate(object sender, DataReceivedEventArgs args)
+                {
+                    AppendServerLog(args.Data);
+                };
+                serverProcess.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs args)
+                {
+                    AppendServerLog(args.Data);
+                };
+                serverProcess.Exited += delegate
+                {
+                    try
+                    {
+                        AppendServerLog("Server exited with code " + serverProcess.ExitCode + ".");
+                    }
+                    catch
+                    {
+                    }
+                };
                 serverProcess.Start();
+                serverProcess.BeginOutputReadLine();
+                serverProcess.BeginErrorReadLine();
                 WaitForServer();
             }
             catch (Exception error)
             {
+                AppendServerLog("Server startup error: " + error);
                 MessageBox.Show(
                     "Не удалось запустить сервер: " + error.Message,
                     "bm-blocked",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
+            }
+        }
+
+        private static void NormalizePathEnvironmentVariable()
+        {
+            var pathValue = Environment.GetEnvironmentVariable("PATH") ?? "";
+
+            Environment.SetEnvironmentVariable(
+                "PATH",
+                null,
+                EnvironmentVariableTarget.Process);
+            Environment.SetEnvironmentVariable(
+                "Path",
+                pathValue,
+                EnvironmentVariableTarget.Process);
+        }
+
+        private void AppendServerLog(string line)
+        {
+            if (String.IsNullOrEmpty(line))
+            {
+                return;
+            }
+
+            try
+            {
+                lock (serverLogLock)
+                {
+                    File.AppendAllText(
+                        serverLogPath,
+                        line + Environment.NewLine,
+                        Encoding.UTF8);
+                }
+            }
+            catch
+            {
             }
         }
 

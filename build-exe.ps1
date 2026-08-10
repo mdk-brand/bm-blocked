@@ -5,6 +5,9 @@ $dist = Join-Path $root "dist"
 $runtime = Join-Path $dist "runtime"
 $licenses = Join-Path $dist "licenses"
 $source = Join-Path $root "scripts\BmBlockedTray.cs"
+$icon = Join-Path $root "assets\icons\bm-blocked.ico"
+$favicon = Join-Path $root "favicon.ico"
+$faviconPng = Join-Path $root "favicon.png"
 $notificationVendor = Join-Path $root "vendor\notifications"
 $toastToolkit = Join-Path $notificationVendor "Microsoft.Toolkit.Uwp.Notifications.dll"
 $valueTuple = Join-Path $notificationVendor "System.ValueTuple.dll"
@@ -24,6 +27,8 @@ $codexNode = Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA "OpenAI\Codex\runt
   Select-Object -First 1 -ExpandProperty FullName
 $nodeSource = if ($systemNode) { $systemNode } else { $codexNode }
 
+& (Join-Path $root "scripts\build-icons.ps1")
+
 if (-not (Test-Path $compiler)) {
   throw "C# compiler not found: $compiler"
 }
@@ -34,6 +39,10 @@ if (-not $nodeSource -or -not (Test-Path $nodeSource)) {
 
 if (-not (Test-Path $authConfig)) {
   throw "auth-config.json not found. Copy the company authorization config before building."
+}
+
+if (-not (Test-Path $icon) -or -not (Test-Path $favicon) -or -not (Test-Path $faviconPng)) {
+  throw "Application icons are missing. Run scripts\build-icons.ps1 first."
 }
 
 if (-not (Test-Path $toastToolkit) -or -not (Test-Path $valueTuple)) {
@@ -65,6 +74,7 @@ $exePath = Join-Path $dist "bm-blocked.exe"
   /target:winexe `
   /platform:anycpu `
   /optimize+ `
+  /win32icon:$icon `
   /out:$exePath `
   /reference:System.dll `
   /reference:System.Drawing.dll `
@@ -86,6 +96,8 @@ if ($LASTEXITCODE -ne 0) {
 
 Copy-Item -Force (Join-Path $root "server.js") (Join-Path $dist "server.js")
 Copy-Item -Force (Join-Path $root "index.html") (Join-Path $dist "index.html")
+Copy-Item -Force $favicon (Join-Path $dist "favicon.ico")
+Copy-Item -Force $faviconPng (Join-Path $dist "favicon.png")
 Copy-Item -Force $authConfig (Join-Path $dist "auth-config.json")
 Copy-Item -Force (Join-Path $root "README.md") (Join-Path $dist "README.txt")
 Copy-Item -Force $nodeSource (Join-Path $runtime "node.exe")
@@ -93,6 +105,25 @@ Copy-Item -Force $toastToolkit (Join-Path $dist "Microsoft.Toolkit.Uwp.Notificat
 Copy-Item -Force $valueTuple (Join-Path $dist "System.ValueTuple.dll")
 Copy-Item -Force (Join-Path $notificationVendor "Microsoft.Toolkit.Uwp.Notifications.LICENSE.md") $licenses
 Copy-Item -Force (Join-Path $notificationVendor "System.ValueTuple.LICENSE.txt") $licenses
+
+$manifestPath = Join-Path $dist "app-manifest.json"
+$manifestFiles = @(
+  Get-ChildItem -LiteralPath $dist -Recurse -File |
+    ForEach-Object {
+      $_.FullName.Substring($dist.Length).TrimStart('\').Replace('\', '/')
+    }
+  "app-manifest.json"
+) | Sort-Object -Unique
+$manifest = [ordered]@{
+  schemaVersion = 1
+  files = $manifestFiles
+}
+$manifestJson = $manifest | ConvertTo-Json -Depth 4
+[IO.File]::WriteAllText(
+  $manifestPath,
+  "$manifestJson`r`n",
+  [Text.UTF8Encoding]::new($false)
+)
 
 if (Test-Path $archive) {
   Remove-Item -LiteralPath $archive -Force
