@@ -2424,6 +2424,16 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "GET" && requestUrl.pathname === "/api/update-status") {
+    handleUpdateStatusApi(req, res);
+    return;
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/update-action") {
+    handleUpdateActionApi(req, res);
+    return;
+  }
+
   if (requestUrl.pathname.startsWith("/api/") && !readSession(req)) {
     sendJson(res, 401, { error: "Требуется вход в bm-blocked." });
     return;
@@ -2476,16 +2486,6 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "POST" && requestUrl.pathname === "/api/desktop-notification") {
     handleDesktopNotificationApi(req, res);
-    return;
-  }
-
-  if (req.method === "GET" && requestUrl.pathname === "/api/update-status") {
-    handleUpdateStatusApi(req, res);
-    return;
-  }
-
-  if (req.method === "POST" && requestUrl.pathname === "/api/update-action") {
-    handleUpdateActionApi(req, res);
     return;
   }
 

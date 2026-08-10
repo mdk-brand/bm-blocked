@@ -18,8 +18,8 @@ using Microsoft.Toolkit.Uwp.Notifications;
 [assembly: System.Reflection.AssemblyDescription("Проверка заблокированных площадок Яндекс Директа")]
 [assembly: System.Reflection.AssemblyCompany("Brandmaker")]
 [assembly: System.Reflection.AssemblyProduct("bm-blocked")]
-[assembly: System.Reflection.AssemblyVersion("1.1.2.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.2.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.3.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.3.0")]
 
 namespace BmBlocked
 {
@@ -81,10 +81,7 @@ namespace BmBlocked
 
                     if (!String.IsNullOrWhiteSpace(toastAction))
                     {
-                        if (!ForwardToRunningInstance("update-action", toastAction))
-                        {
-                            TrayAppContext.OpenService();
-                        }
+                        ForwardToRunningInstance("update-action", toastAction);
                     }
                     else if (Environment.GetEnvironmentVariable("BM_BLOCKED_LAUNCHER_NO_BROWSER") != "1")
                     {
@@ -378,6 +375,7 @@ namespace BmBlocked
         private static WebClient CreateWebClient()
         {
             var client = new WebClient();
+            client.Encoding = Encoding.UTF8;
             client.Headers[HttpRequestHeader.UserAgent] =
                 "bm-blocked-updater/" + CurrentVersion.ToString(3);
             client.Headers[HttpRequestHeader.Accept] = "application/vnd.github+json";
@@ -1204,7 +1202,6 @@ namespace BmBlocked
 
             RemoveUpdateToast();
             PublishUpdateState(availableRelease, true);
-            OpenService();
         }
 
         private void PublishUpdateState(ReleaseInfo release, bool showReleaseNotes)
