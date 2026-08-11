@@ -5,3 +5,6 @@ dist/
 *.zip
 *.zip.sha256
 auth-config.json
+operation-history.json
+remembered-token.json
+trusted-session-key.dat

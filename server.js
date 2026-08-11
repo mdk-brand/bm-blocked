@@ -1,6 +1,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
@@ -26,8 +27,15 @@ const siteCheckTimeoutMs = 8000;
 const reportWaitTimeoutMs = 10 * 60 * 1000;
 const authConfigPath = path.join(root, "auth-config.json");
 const settingsPath = path.join(root, "settings.json");
-const lastOperationPath = path.join(root, "last-operation.json");
+const userDataDirectory = process.env.BM_BLOCKED_USER_DATA_DIR
+  ? path.resolve(process.env.BM_BLOCKED_USER_DATA_DIR)
+  : root;
+const legacyOperationHistoryPath = path.join(root, "operation-history.json");
+const operationHistoryPath = path.join(userDataDirectory, "operation-history.json");
+const rememberedTokenPath = path.join(userDataDirectory, "remembered-token.json");
+const operationHistoryLimit = 200;
 const excludedSitesLimit = 1000;
+const yandexUserInfoUrl = "https://login.yandex.ru/info?format=json";
 const availableChannelPrefixes = Object.freeze([
   "t.me/",
   "max.ru/",
@@ -41,11 +49,13 @@ const defaultChannelSettings = Object.freeze({
   prefixes: [...availableChannelPrefixes],
 });
 const authCookieName = "bm_blocked_session";
-const authSessionDurationSeconds = 12 * 60 * 60;
+const authSessionDurationSeconds = 7 * 24 * 60 * 60;
 const authLoginWindowMs = 15 * 60 * 1000;
 const authMaxLoginAttempts = 5;
 const authLoginAttempts = new Map();
 const placementCheckJobs = new Map();
+let rememberedTokenCleanupTimer = null;
+let operationHistoryMigrationPromise = null;
 let updateState = {
   available: false,
   tag: "",
@@ -54,7 +64,17 @@ let updateState = {
   showReleaseNotes: false,
   revision: 0,
 };
-const authRuntimeSessionSecret = crypto.randomBytes(32);
+const trustedSessionSecret = parseTrustedSessionSecret(
+  process.env.BM_BLOCKED_TRUSTED_SESSION_SECRET,
+);
+const authRuntimeSessionSecret = trustedSessionSecret || crypto.randomBytes(32);
+const rememberedTokenEncryptionKey = trustedSessionSecret
+  ? crypto
+      .createHash("sha256")
+      .update(trustedSessionSecret)
+      .update("bm-blocked:remembered-token:v1")
+      .digest()
+  : null;
 const authConfig = await loadAuthConfig();
 let channelSettings = await loadChannelSettings();
 const checkedWebsiteZones = new Set([
@@ -218,6 +238,185 @@ async function writeJsonAtomically(filePath, payload) {
   }
 }
 
+function parseTrustedSessionSecret(value) {
+  try {
+    const secret = Buffer.from(String(value || "").trim(), "base64");
+    return secret.length === 32 ? secret : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function encryptRememberedTokenPayload(
+  token,
+  expiresAt,
+  encryptionKey = rememberedTokenEncryptionKey,
+) {
+  if (!Buffer.isBuffer(encryptionKey) || encryptionKey.length !== 32) {
+    throw new Error("Защищенное хранение токена недоступно.");
+  }
+
+  const normalizedToken = String(token || "").trim();
+  const normalizedExpiresAt = Math.trunc(Number(expiresAt));
+
+  if (!normalizedToken || !Number.isFinite(normalizedExpiresAt)) {
+    throw new Error("Некорректные данные для сохранения токена.");
+  }
+
+  const initializationVector = crypto.randomBytes(12);
+  const authenticatedData = Buffer.from(
+    `bm-blocked:remembered-token:v1:${normalizedExpiresAt}`,
+    "utf8",
+  );
+  const cipher = crypto.createCipheriv(
+    "aes-256-gcm",
+    encryptionKey,
+    initializationVector,
+  );
+  cipher.setAAD(authenticatedData);
+  const encryptedToken = Buffer.concat([
+    cipher.update(normalizedToken, "utf8"),
+    cipher.final(),
+  ]);
+
+  return {
+    schemaVersion: 1,
+    expiresAt: normalizedExpiresAt,
+    initializationVector: initializationVector.toString("base64"),
+    authenticationTag: cipher.getAuthTag().toString("base64"),
+    encryptedToken: encryptedToken.toString("base64"),
+  };
+}
+
+function decryptRememberedTokenPayload(
+  payload,
+  encryptionKey = rememberedTokenEncryptionKey,
+) {
+  if (
+    !Buffer.isBuffer(encryptionKey) ||
+    encryptionKey.length !== 32 ||
+    payload?.schemaVersion !== 1 ||
+    !Number.isFinite(Number(payload.expiresAt))
+  ) {
+    throw new Error("Некорректный файл сохраненного токена.");
+  }
+
+  const expiresAt = Math.trunc(Number(payload.expiresAt));
+  const initializationVector = Buffer.from(
+    String(payload.initializationVector || ""),
+    "base64",
+  );
+  const authenticationTag = Buffer.from(
+    String(payload.authenticationTag || ""),
+    "base64",
+  );
+  const encryptedToken = Buffer.from(
+    String(payload.encryptedToken || ""),
+    "base64",
+  );
+
+  if (initializationVector.length !== 12 || authenticationTag.length !== 16) {
+    throw new Error("Некорректный файл сохраненного токена.");
+  }
+
+  const decipher = crypto.createDecipheriv(
+    "aes-256-gcm",
+    encryptionKey,
+    initializationVector,
+  );
+  decipher.setAAD(
+    Buffer.from(`bm-blocked:remembered-token:v1:${expiresAt}`, "utf8"),
+  );
+  decipher.setAuthTag(authenticationTag);
+  const token = Buffer.concat([
+    decipher.update(encryptedToken),
+    decipher.final(),
+  ]).toString("utf8").trim();
+
+  if (!token) {
+    throw new Error("Сохраненный токен пуст.");
+  }
+
+  return { token, expiresAt };
+}
+
+async function clearRememberedToken() {
+  if (rememberedTokenCleanupTimer !== null) {
+    clearTimeout(rememberedTokenCleanupTimer);
+    rememberedTokenCleanupTimer = null;
+  }
+
+  await fs.rm(rememberedTokenPath, { force: true });
+}
+
+function scheduleRememberedTokenCleanup(expiresAt) {
+  if (rememberedTokenCleanupTimer !== null) {
+    clearTimeout(rememberedTokenCleanupTimer);
+  }
+
+  const delay = Math.max(0, Number(expiresAt) - Date.now());
+  rememberedTokenCleanupTimer = setTimeout(() => {
+    rememberedTokenCleanupTimer = null;
+    clearRememberedToken().catch(() => {});
+  }, delay);
+  rememberedTokenCleanupTimer.unref();
+}
+
+async function saveRememberedToken(token, expiresAt) {
+  if (!rememberedTokenEncryptionKey) {
+    return false;
+  }
+
+  await fs.mkdir(userDataDirectory, { recursive: true });
+  await writeJsonAtomically(
+    rememberedTokenPath,
+    encryptRememberedTokenPayload(token, expiresAt),
+  );
+  scheduleRememberedTokenCleanup(expiresAt);
+  return true;
+}
+
+async function loadRememberedToken() {
+  if (!rememberedTokenEncryptionKey) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(await fs.readFile(rememberedTokenPath, "utf8"));
+    const remembered = decryptRememberedTokenPayload(payload);
+
+    if (remembered.expiresAt <= Date.now()) {
+      await clearRememberedToken();
+      return null;
+    }
+
+    scheduleRememberedTokenCleanup(remembered.expiresAt);
+    return remembered;
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      await clearRememberedToken().catch(() => {});
+    }
+
+    return null;
+  }
+}
+
+async function extendRememberedTokenExpiration(expiresAt) {
+  const remembered = await loadRememberedToken();
+
+  if (remembered) {
+    await saveRememberedToken(remembered.token, expiresAt);
+  }
+}
+
+if (
+  rememberedTokenEncryptionKey &&
+  process.env.BM_BLOCKED_DISABLE_SERVER !== "1"
+) {
+  setTimeout(() => loadRememberedToken().catch(() => {}), 0).unref();
+  setTimeout(() => ensureOperationHistoryMigrated().catch(() => {}), 0).unref();
+}
+
 async function saveChannelSettings(nextSettings) {
   const normalizedSettings = normalizeChannelSettings(nextSettings);
   await writeJsonAtomically(settingsPath, normalizedSettings);
@@ -305,11 +504,12 @@ function parseCookies(req) {
     }, {});
 }
 
-function createSessionToken() {
+function createSessionToken(now = Date.now()) {
+  const expiresAt = now + authSessionDurationSeconds * 1000;
   const payload = Buffer.from(
     JSON.stringify({
       sessionId: crypto.randomBytes(16).toString("base64url"),
-      expiresAt: Date.now() + authSessionDurationSeconds * 1000,
+      expiresAt,
     }),
   ).toString("base64url");
   const signature = crypto
@@ -317,7 +517,10 @@ function createSessionToken() {
     .update(payload)
     .digest("base64url");
 
-  return `${payload}.${signature}`;
+  return {
+    value: `${payload}.${signature}`,
+    expiresAt,
+  };
 }
 
 function readSession(req) {
@@ -446,12 +649,22 @@ async function handleAuthLoginApi(req, res) {
 
     authLoginAttempts.delete(getLoginAttemptKey(req));
     const sessionToken = createSessionToken();
+
+    try {
+      await extendRememberedTokenExpiration(sessionToken.expiresAt);
+    } catch (error) {
+    }
+
     sendJson(
       res,
       200,
-      { authenticated: true, username: "Сотрудник" },
       {
-        "Set-Cookie": `${authCookieName}=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${authSessionDurationSeconds}`,
+        authenticated: true,
+        username: "Сотрудник",
+        expiresAt: sessionToken.expiresAt,
+      },
+      {
+        "Set-Cookie": `${authCookieName}=${encodeURIComponent(sessionToken.value)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${authSessionDurationSeconds}`,
       },
     );
   } catch (error) {
@@ -465,18 +678,44 @@ function handleAuthStatusApi(req, res) {
     configured: Boolean(authConfig),
     authenticated: Boolean(session),
     username: session ? "Сотрудник" : "",
+    expiresAt: session?.expiresAt || null,
   });
 }
 
-function handleAuthLogoutApi(req, res) {
+async function handleAuthLogoutApi(req, res) {
+  if (!readSession(req)) {
+    sendJson(res, 401, { error: "Сессия уже завершена." });
+    return;
+  }
+
+  let tokenCleared = true;
+
+  try {
+    await clearRememberedToken();
+  } catch (error) {
+    tokenCleared = false;
+  }
+
   sendJson(
     res,
     200,
-    { authenticated: false },
+    { authenticated: false, tokenCleared },
     {
       "Set-Cookie": `${authCookieName}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
     },
   );
+}
+
+async function handleRememberedTokenApi(req, res) {
+  try {
+    const remembered = await loadRememberedToken();
+    sendJson(res, 200, {
+      token: remembered?.token || "",
+      expiresAt: remembered?.expiresAt || null,
+    });
+  } catch (error) {
+    sendJson(res, 500, { error: "Не удалось восстановить сохраненный токен." });
+  }
 }
 
 function directHeaders(token, clientLogin = "") {
@@ -528,6 +767,59 @@ async function directRequest(token, pathName, body, options = {}) {
   }
 
   return payload.result || {};
+}
+
+async function loadYandexTokenOwner(token) {
+  let response;
+
+  try {
+    response = await fetch(yandexUserInfoUrl, {
+      headers: {
+        Authorization: `OAuth ${token}`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (error) {
+    return null;
+  }
+
+  let payload;
+
+  try {
+    payload = await response.json();
+  } catch (error) {
+    return null;
+  }
+
+  const id = String(payload?.id || "").trim();
+  const login = String(payload?.login || "").trim();
+
+  if (!response.ok || !id) {
+    return null;
+  }
+
+  return { id, login };
+}
+
+async function resolveOperationAccount(token) {
+  const tokenKey = crypto
+    .createHash("sha256")
+    .update(`bm-blocked:token:${token}`)
+    .digest("hex");
+  const owner = await loadYandexTokenOwner(token);
+  const accountKey = owner?.id
+    ? crypto
+        .createHash("sha256")
+        .update(`bm-blocked:yandex-account:${owner.id}`)
+        .digest("hex")
+    : "";
+
+  return {
+    accountKey,
+    tokenKey,
+    login: owner?.login || "",
+  };
 }
 
 function requireString(payload, key, label = key) {
@@ -1725,116 +2017,429 @@ async function applyExcludedSitesUpdates(token, clientLogin, updates = []) {
   return { updatedCampaignIds, failedCampaigns };
 }
 
-function createOperationBackup(action, clientLogin, updates) {
+function normalizeHistoryOperation(value) {
+  if (
+    !value ||
+    value.source !== "bm-blocked" ||
+    !value.operationId ||
+    !["clear", "block-channels"].includes(value.action) ||
+    (!value.accountKey && !value.tokenKey) ||
+    !value.clientLogin ||
+    !Array.isArray(value.campaigns)
+  ) {
+    return null;
+  }
+
+  const campaigns = value.campaigns
+    .map((campaign) => {
+      const changedPlacements = Array.from(
+        new Set(
+          (Array.isArray(campaign?.changedPlacements)
+            ? campaign.changedPlacements
+            : [])
+            .map((placement) => String(placement || "").trim())
+            .filter(Boolean),
+        ),
+      );
+
+      if (!campaign?.campaignId || !campaign?.campaignType || changedPlacements.length === 0) {
+        return null;
+      }
+
+      return {
+        campaignId: String(campaign.campaignId),
+        campaignName: String(campaign.campaignName || campaign.campaignId),
+        campaignType: String(campaign.campaignType),
+        changedPlacements,
+        revertedAt: String(campaign.revertedAt || ""),
+      };
+    })
+    .filter(Boolean);
+
+  if (campaigns.length === 0) {
+    return null;
+  }
+
   return {
+    source: "bm-blocked",
+    operationId: String(value.operationId),
+    action: value.action,
+    accountKey: String(value.accountKey || ""),
+    tokenKey: String(value.tokenKey || ""),
+    accountLogin: String(value.accountLogin || ""),
+    clientLogin: String(value.clientLogin),
+    clientName: String(value.clientName || value.clientLogin),
+    createdAt: String(value.createdAt || ""),
+    revertedAt: String(value.revertedAt || ""),
+    campaigns,
+  };
+}
+
+async function migrateOperationHistoryFile(legacyPath, currentPath) {
+  if (path.resolve(legacyPath) === path.resolve(currentPath)) {
+    return false;
+  }
+
+  try {
+    await fs.access(currentPath);
+    return false;
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  try {
+    await fs.mkdir(path.dirname(currentPath), { recursive: true });
+    await fs.copyFile(legacyPath, currentPath, fsConstants.COPYFILE_EXCL);
+    return true;
+  } catch (error) {
+    if (["ENOENT", "EEXIST"].includes(error.code)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+async function ensureOperationHistoryMigrated() {
+  if (!operationHistoryMigrationPromise) {
+    operationHistoryMigrationPromise = migrateOperationHistoryFile(
+      legacyOperationHistoryPath,
+      operationHistoryPath,
+    ).catch((error) => {
+      console.warn(`Operation history migration failed: ${error.message}`);
+      return false;
+    });
+  }
+
+  return operationHistoryMigrationPromise;
+}
+
+async function loadOperationHistory() {
+  await ensureOperationHistoryMigrated();
+
+  try {
+    const payload = JSON.parse(await fs.readFile(operationHistoryPath, "utf8"));
+    const operations = Array.isArray(payload?.operations)
+      ? payload.operations.map(normalizeHistoryOperation).filter(Boolean)
+      : [];
+
+    return { schemaVersion: 1, operations };
+  } catch (error) {
+    return { schemaVersion: 1, operations: [] };
+  }
+}
+
+async function saveOperationHistory(history) {
+  await ensureOperationHistoryMigrated();
+  await fs.mkdir(userDataDirectory, { recursive: true });
+  await writeJsonAtomically(operationHistoryPath, {
     schemaVersion: 1,
-    operationId: crypto.randomUUID(),
-    action,
-    clientLogin,
-    createdAt: new Date().toISOString(),
-    campaigns: updates.map((update) => ({
+    operations: history.operations.slice(0, operationHistoryLimit),
+  });
+}
+
+function operationMatchesAccount(operation, account) {
+  return Boolean(
+    (operation.accountKey && account.accountKey && operation.accountKey === account.accountKey) ||
+    (operation.tokenKey && operation.tokenKey === account.tokenKey),
+  );
+}
+
+function createHistoryOperation(
+  action,
+  account,
+  clientLogin,
+  clientName,
+  updates,
+  updatedCampaignIds,
+) {
+  const updatedIds = new Set(updatedCampaignIds);
+  const campaigns = updates
+    .filter((update) => updatedIds.has(update.campaignId))
+    .map((update) => ({
       campaignId: update.campaignId,
       campaignName: update.campaignName || update.campaignId,
       campaignType: update.campaignType,
-      previousSites: [...update.previousSites],
+      changedPlacements: [
+        ...(action === "clear" ? update.removedSites : update.addedChannels),
+      ],
+      revertedAt: "",
+    }))
+    .filter((campaign) => campaign.changedPlacements.length > 0);
+
+  if (campaigns.length === 0) {
+    return null;
+  }
+
+  return {
+    source: "bm-blocked",
+    operationId: crypto.randomUUID(),
+    action,
+    accountKey: account.accountKey,
+    tokenKey: account.tokenKey,
+    accountLogin: account.login,
+    clientLogin,
+    clientName: clientName || clientLogin,
+    createdAt: new Date().toISOString(),
+    revertedAt: "",
+    campaigns,
+  };
+}
+
+async function appendOperationHistory(operation) {
+  if (!operation) {
+    return;
+  }
+
+  const history = await loadOperationHistory();
+  history.operations.unshift(operation);
+  await saveOperationHistory(history);
+}
+
+function toPublicHistoryOperation(operation) {
+  const placementCount = operation.campaigns.reduce(
+    (sum, campaign) => sum + campaign.changedPlacements.length,
+    0,
+  );
+  const pendingCampaigns = operation.campaigns.filter((campaign) => !campaign.revertedAt);
+
+  return {
+    operationId: operation.operationId,
+    action: operation.action,
+    accountLogin: operation.accountLogin,
+    clientLogin: operation.clientLogin,
+    clientName: operation.clientName,
+    createdAt: operation.createdAt,
+    revertedAt: operation.revertedAt,
+    placementCount,
+    campaignCount: operation.campaigns.length,
+    revertable: pendingCampaigns.length > 0,
+    campaigns: operation.campaigns.map((campaign) => ({
+      campaignId: campaign.campaignId,
+      campaignName: campaign.campaignName,
+      placements: [...campaign.changedPlacements],
+      reverted: Boolean(campaign.revertedAt),
     })),
   };
 }
 
-async function saveOperationBackup(operation) {
-  await writeJsonAtomically(lastOperationPath, operation);
-}
-
-async function loadOperationBackup() {
-  try {
-    const operation = JSON.parse(await fs.readFile(lastOperationPath, "utf8"));
-
-    if (
-      operation?.schemaVersion !== 1 ||
-      !operation.operationId ||
-      !operation.clientLogin ||
-      !Array.isArray(operation.campaigns)
-    ) {
-      return null;
-    }
-
-    return operation;
-  } catch (error) {
-    return null;
-  }
-}
-
-async function clearOperationBackup() {
-  await fs.rm(lastOperationPath, { force: true });
-}
-
-function toPublicUndoState(operation, clientLogin) {
-  const available = Boolean(
-    operation &&
-    operation.clientLogin === clientLogin &&
-    operation.campaigns.length > 0,
-  );
+async function getOperationHistoryForToken(token) {
+  const account = await resolveOperationAccount(token);
+  const history = await loadOperationHistory();
+  const operations = history.operations
+    .filter((operation) => operationMatchesAccount(operation, account))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .map(toPublicHistoryOperation);
 
   return {
-    available,
-    action: available ? operation.action : "",
-    createdAt: available ? operation.createdAt : "",
-    campaignCount: available ? operation.campaigns.length : 0,
+    ownerLogin: account.login || operations[0]?.accountLogin || "",
+    operations,
   };
 }
 
-async function getUndoState(clientLogin) {
-  return toPublicUndoState(await loadOperationBackup(), clientLogin);
-}
+async function loadCampaignsForHistoryReversal(token, operation) {
+  const campaigns = new Map();
+  const groups = [
+    {
+      type: "TEXT_CAMPAIGN",
+      apiBaseUrl: directApiBaseUrl,
+    },
+    {
+      type: "UNIFIED_CAMPAIGN",
+      apiBaseUrl: directApiUnifiedBaseUrl,
+    },
+  ];
 
-async function undoLastOperation(token, clientLogin) {
-  const operation = await loadOperationBackup();
+  for (const group of groups) {
+    const ids = operation.campaigns
+      .filter((campaign) => !campaign.revertedAt && campaign.campaignType === group.type)
+      .map((campaign) => Number(campaign.campaignId))
+      .filter(Number.isFinite);
 
-  if (!operation || operation.clientLogin !== clientLogin) {
-    throw new InputError("Для выбранного клиента нет действия, которое можно отменить.");
+    if (ids.length === 0) {
+      continue;
+    }
+
+    const result = await directRequest(
+      token,
+      "campaigns",
+      {
+        method: "get",
+        params: {
+          SelectionCriteria: { Ids: ids },
+          FieldNames: ["Id", "Name", "Type", "ExcludedSites"],
+        },
+      },
+      {
+        clientLogin: operation.clientLogin,
+        apiBaseUrl: group.apiBaseUrl,
+      },
+    );
+
+    for (const campaign of result.Campaigns || []) {
+      campaigns.set(String(campaign.Id), {
+        campaignId: String(campaign.Id),
+        campaignName: campaign.Name || String(campaign.Id),
+        campaignType: campaign.Type || group.type,
+        blockedSites: getExcludedSites(campaign),
+      });
+    }
   }
 
-  const updates = operation.campaigns.map((campaign) => ({
-    campaignId: campaign.campaignId,
-    campaignName: campaign.campaignName,
-    campaignType: campaign.campaignType,
-    blockedSites: Array.isArray(campaign.previousSites)
-      ? campaign.previousSites.map(String)
-      : [],
-  }));
-  const { updatedCampaignIds, failedCampaigns } = await applyExcludedSitesUpdates(
-    token,
-    clientLogin,
-    updates,
-  );
-  const failedIds = new Set(failedCampaigns.map((campaign) => campaign.campaignId));
+  return campaigns;
+}
 
-  if (failedIds.size === 0) {
-    await clearOperationBackup();
-  } else {
-    await saveOperationBackup({
-      ...operation,
-      campaigns: operation.campaigns.filter((campaign) =>
-        failedIds.has(campaign.campaignId),
-      ),
+function buildReversedBlockedSites(action, currentSites, changedSites) {
+  const blockedSites = Array.isArray(currentSites) ? [...currentSites] : [];
+  const placements = Array.from(
+    new Set(
+      (Array.isArray(changedSites) ? changedSites : [])
+        .map((placement) => String(placement || "").trim())
+        .filter(Boolean),
+    ),
+  );
+  const changedKeys = new Set(
+    placements.map((placement) => placement.toLowerCase()),
+  );
+
+  if (action === "block-channels") {
+    const nextSites = blockedSites.filter(
+      (placement) => !changedKeys.has(placement.toLowerCase()),
+    );
+
+    return {
+      blockedSites: nextSites,
+      changedCount: blockedSites.length - nextSites.length,
+      exceedsLimit: false,
+    };
+  }
+
+  if (action !== "clear") {
+    throw new InputError("Неизвестный тип операции в истории.");
+  }
+
+  const existingKeys = new Set(
+    blockedSites.map((placement) => placement.toLowerCase()),
+  );
+  const missingPlacements = placements.filter(
+    (placement) => !existingKeys.has(placement.toLowerCase()),
+  );
+
+  return {
+    blockedSites: [...blockedSites, ...missingPlacements],
+    changedCount: missingPlacements.length,
+    exceedsLimit: blockedSites.length + missingPlacements.length > excludedSitesLimit,
+  };
+}
+
+async function reverseHistoryOperation(token, operationId) {
+  const account = await resolveOperationAccount(token);
+  const history = await loadOperationHistory();
+  const operation = history.operations.find(
+    (item) => item.operationId === operationId && operationMatchesAccount(item, account),
+  );
+
+  if (!operation) {
+    throw new InputError("Операция не найдена для аккаунта этого токена.");
+  }
+
+  const pendingCampaigns = operation.campaigns.filter((campaign) => !campaign.revertedAt);
+
+  if (pendingCampaigns.length === 0) {
+    throw new InputError("Эта операция уже отменена.");
+  }
+
+  const currentCampaigns = await loadCampaignsForHistoryReversal(token, operation);
+  const updates = [];
+  const failedCampaigns = [];
+  const completedIds = new Set();
+
+  for (const operationCampaign of pendingCampaigns) {
+    const campaign = currentCampaigns.get(operationCampaign.campaignId);
+
+    if (!campaign) {
+      failedCampaigns.push({
+        campaignId: operationCampaign.campaignId,
+        error: "Кампания не найдена или недоступна для изменения.",
+      });
+      continue;
+    }
+
+    const reversed = buildReversedBlockedSites(
+      operation.action,
+      campaign.blockedSites,
+      operationCampaign.changedPlacements,
+    );
+
+    if (reversed.exceedsLimit) {
+      failedCampaigns.push({
+        campaignId: operationCampaign.campaignId,
+        error: "Недостаточно свободных мест в списке запрещенных площадок.",
+      });
+      continue;
+    }
+
+    if (reversed.changedCount === 0) {
+      completedIds.add(operationCampaign.campaignId);
+      continue;
+    }
+
+    updates.push({
+      campaignId: campaign.campaignId,
+      campaignName: campaign.campaignName,
+      campaignType: operationCampaign.campaignType,
+      blockedSites: reversed.blockedSites,
+      changedCount: reversed.changedCount,
     });
   }
 
+  const mutation = await applyExcludedSitesUpdates(
+    token,
+    operation.clientLogin,
+    updates,
+  );
+  failedCampaigns.push(...mutation.failedCampaigns);
+
+  for (const campaignId of mutation.updatedCampaignIds) {
+    completedIds.add(campaignId);
+  }
+
+  const revertedAt = new Date().toISOString();
+
+  operation.campaigns = operation.campaigns.map((campaign) =>
+    completedIds.has(campaign.campaignId)
+      ? { ...campaign, revertedAt }
+      : campaign,
+  );
+
+  if (operation.campaigns.every((campaign) => Boolean(campaign.revertedAt))) {
+    operation.revertedAt = revertedAt;
+  }
+
+  await saveOperationHistory(history);
+
   return {
-    restoredCampaigns: updates
-      .filter((update) => updatedCampaignIds.includes(update.campaignId))
-      .map((update) => ({
-        campaignId: update.campaignId,
-        blockedCount: update.blockedSites.length,
-      })),
+    operation: toPublicHistoryOperation(operation),
     failedCampaigns,
-    totalRestoredCampaigns: updatedCampaignIds.length,
-    undo: await getUndoState(clientLogin),
+    totalRevertedCampaigns: completedIds.size,
+    totalRevertedPlacements: updates
+      .filter((update) => completedIds.has(update.campaignId))
+      .reduce((sum, update) => sum + update.changedCount, 0),
   };
 }
 
-async function clearUnavailablePlacements(token, clientLogin, selections = []) {
-  const campaigns = await loadBlockedPlacementsReport(token, clientLogin);
+async function clearUnavailablePlacements(
+  token,
+  clientLogin,
+  clientName,
+  selections = [],
+) {
+  const [campaigns, account] = await Promise.all([
+    loadBlockedPlacementsReport(token, clientLogin),
+    resolveOperationAccount(token),
+  ]);
   const campaignsById = new Map(
     campaigns.map((campaign) => [campaign.campaignId, campaign]),
   );
@@ -1860,6 +2465,9 @@ async function clearUnavailablePlacements(token, clientLogin, selections = []) {
     const remainingSites = campaign.blockedSites.filter(
       (placement) => !unavailableSet.has(placement),
     );
+    const removedSites = campaign.blockedSites.filter(
+      (placement) => unavailableSet.has(placement),
+    );
     const removedCount = campaign.blockedSites.length - remainingSites.length;
 
     if (removedCount === 0) {
@@ -1871,18 +2479,9 @@ async function clearUnavailablePlacements(token, clientLogin, selections = []) {
       campaignName: campaign.campaignName,
       campaignType: campaign.campaignType,
       removedCount,
-      previousSites: campaign.blockedSites,
+      removedSites,
       blockedSites: remainingSites,
     });
-  }
-
-  const previousOperation = await loadOperationBackup();
-  const operation = updates.length > 0
-    ? createOperationBackup("clear", clientLogin, updates)
-    : null;
-
-  if (operation) {
-    await saveOperationBackup(operation);
   }
 
   const mutation = await applyExcludedSitesUpdates(token, clientLogin, updates);
@@ -1896,18 +2495,16 @@ async function clearUnavailablePlacements(token, clientLogin, selections = []) {
       blockedCount: update.blockedSites.length,
     }));
 
-  if (operation && updatedCampaigns.length > 0) {
-    await saveOperationBackup({
-      ...operation,
-      campaigns: operation.campaigns.filter((campaign) =>
-        updatedIds.has(campaign.campaignId),
-      ),
-    });
-  } else if (operation && previousOperation) {
-    await saveOperationBackup(previousOperation);
-  } else if (operation) {
-    await clearOperationBackup();
-  }
+  await appendOperationHistory(
+    createHistoryOperation(
+      "clear",
+      account,
+      clientLogin,
+      clientName,
+      updates,
+      mutation.updatedCampaignIds,
+    ),
+  );
 
   return {
     updatedCampaigns,
@@ -1916,7 +2513,6 @@ async function clearUnavailablePlacements(token, clientLogin, selections = []) {
       (sum, campaign) => sum + campaign.removedCount,
       0,
     ),
-    undo: await getUndoState(clientLogin),
   };
 }
 
@@ -1935,10 +2531,14 @@ function selectChannelsForAvailableSlots(channels, blockedCount) {
 async function blockChannelPlacements(
   token,
   clientLogin,
+  clientName,
   selections = [],
   settings = channelSettings,
 ) {
-  const campaigns = await loadBlockedPlacementsReport(token, clientLogin);
+  const [campaigns, account] = await Promise.all([
+    loadBlockedPlacementsReport(token, clientLogin),
+    resolveOperationAccount(token),
+  ]);
   const campaignsById = new Map(
     campaigns.map((campaign) => [campaign.campaignId, campaign]),
   );
@@ -2016,20 +2616,10 @@ async function blockChannelPlacements(
       campaignId,
       campaignName: campaign.campaignName,
       campaignType: campaign.campaignType,
-      previousSites: campaign.blockedSites,
       blockedSites,
       addedChannels,
       skippedChannels,
     });
-  }
-
-  const previousOperation = await loadOperationBackup();
-  const operation = updates.length > 0
-    ? createOperationBackup("block-channels", clientLogin, updates)
-    : null;
-
-  if (operation) {
-    await saveOperationBackup(operation);
   }
 
   const mutation = await applyExcludedSitesUpdates(token, clientLogin, updates);
@@ -2045,18 +2635,16 @@ async function blockChannelPlacements(
       addedCount: update.addedChannels.length,
     }));
 
-  if (operation && updatedCampaigns.length > 0) {
-    await saveOperationBackup({
-      ...operation,
-      campaigns: operation.campaigns.filter((campaign) =>
-        updatedIds.has(campaign.campaignId),
-      ),
-    });
-  } else if (operation && previousOperation) {
-    await saveOperationBackup(previousOperation);
-  } else if (operation) {
-    await clearOperationBackup();
-  }
+  await appendOperationHistory(
+    createHistoryOperation(
+      "block-channels",
+      account,
+      clientLogin,
+      clientName,
+      updates,
+      mutation.updatedCampaignIds,
+    ),
+  );
 
   return {
     updatedCampaigns,
@@ -2070,7 +2658,6 @@ async function blockChannelPlacements(
       (sum, campaign) => sum + campaign.skippedCount,
       0,
     ),
-    undo: await getUndoState(clientLogin),
   };
 }
 
@@ -2078,9 +2665,25 @@ async function handleDirectClientsApi(req, res) {
   try {
     const payload = await readJson(req);
     const token = requireString(payload, "token", "OAuth-токен");
-    const clients = await loadDirectClients(token);
+    const [clients, owner] = await Promise.all([
+      loadDirectClients(token),
+      loadYandexTokenOwner(token),
+    ]);
+    const session = readSession(req);
+    let tokenRemembered = false;
 
-    sendJson(res, 200, { clients });
+    if (session) {
+      try {
+        tokenRemembered = await saveRememberedToken(token, session.expiresAt);
+      } catch (error) {
+      }
+    }
+
+    sendJson(res, 200, {
+      clients,
+      owner: owner ? { login: owner.login } : null,
+      tokenRemembered,
+    });
   } catch (error) {
     sendJson(res, error.statusCode || 502, { error: error.message });
   }
@@ -2098,7 +2701,6 @@ async function handleBlockedPlacementsApi(req, res) {
       campaigns: publicCampaigns,
       totalCampaigns: publicCampaigns.length,
       totalBlockedSites: publicCampaigns.reduce((sum, campaign) => sum + campaign.blockedCount, 0),
-      undo: await getUndoState(clientLogin),
     });
   } catch (error) {
     sendJson(res, error.statusCode || 502, { error: error.message });
@@ -2287,6 +2889,7 @@ async function handleClearPlacementsApi(req, res) {
     const payload = await readJson(req);
     const token = requireString(payload, "token", "OAuth-токен");
     const clientLogin = requireString(payload, "clientLogin", "клиент");
+    const clientName = String(payload.clientName || clientLogin).trim().slice(0, 300);
     const selections = Array.isArray(payload.campaigns) ? payload.campaigns : [];
 
     if (selections.length === 0) {
@@ -2296,6 +2899,7 @@ async function handleClearPlacementsApi(req, res) {
     const result = await clearUnavailablePlacements(
       token,
       clientLogin,
+      clientName,
       selections,
     );
 
@@ -2310,6 +2914,7 @@ async function handleBlockChannelsApi(req, res) {
     const payload = await readJson(req);
     const token = requireString(payload, "token", "OAuth-токен");
     const clientLogin = requireString(payload, "clientLogin", "клиент");
+    const clientName = String(payload.clientName || clientLogin).trim().slice(0, 300);
     const selections = Array.isArray(payload.campaigns) ? payload.campaigns : [];
 
     if (selections.length === 0) {
@@ -2319,6 +2924,7 @@ async function handleBlockChannelsApi(req, res) {
     const result = await blockChannelPlacements(
       token,
       clientLogin,
+      clientName,
       selections,
       toPublicChannelSettings(),
     );
@@ -2329,12 +2935,23 @@ async function handleBlockChannelsApi(req, res) {
   }
 }
 
-async function handleUndoApi(req, res) {
+async function handleOperationHistoryApi(req, res) {
   try {
     const payload = await readJson(req);
     const token = requireString(payload, "token", "OAuth-токен");
-    const clientLogin = requireString(payload, "clientLogin", "клиент");
-    const result = await undoLastOperation(token, clientLogin);
+    const result = await getOperationHistoryForToken(token);
+    sendJson(res, 200, result);
+  } catch (error) {
+    sendJson(res, error.statusCode || 502, { error: error.message });
+  }
+}
+
+async function handleReverseHistoryOperationApi(req, res) {
+  try {
+    const payload = await readJson(req);
+    const token = requireString(payload, "token", "OAuth-токен");
+    const operationId = requireString(payload, "operationId", "операция");
+    const result = await reverseHistoryOperation(token, operationId);
     sendJson(res, 200, result);
   } catch (error) {
     sendJson(res, error.statusCode || 502, { error: error.message });
@@ -2439,6 +3056,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "GET" && requestUrl.pathname === "/api/remembered-token") {
+    handleRememberedTokenApi(req, res);
+    return;
+  }
+
   if (req.method === "POST" && requestUrl.pathname === "/api/direct-clients") {
     handleDirectClientsApi(req, res);
     return;
@@ -2499,8 +3121,16 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === "POST" && requestUrl.pathname === "/api/undo") {
-    handleUndoApi(req, res);
+  if (req.method === "POST" && requestUrl.pathname === "/api/operation-history") {
+    handleOperationHistoryApi(req, res);
+    return;
+  }
+
+  if (
+    req.method === "POST" &&
+    requestUrl.pathname === "/api/operation-history/reverse"
+  ) {
+    handleReverseHistoryOperationApi(req, res);
     return;
   }
 
@@ -2569,9 +3199,14 @@ if (
 }
 
 export {
+  buildReversedBlockedSites,
   buildChannelReportDefinition,
+  createSessionToken,
+  decryptRememberedTokenPayload,
+  encryptRememberedTokenPayload,
   getLastDaysRange,
   getLast30DaysRange,
+  migrateOperationHistoryFile,
   normalizeChannelPlacement,
   normalizeChannelSettings,
   parseChannelPerformanceReport,

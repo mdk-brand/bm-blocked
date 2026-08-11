@@ -18,11 +18,93 @@ using Microsoft.Toolkit.Uwp.Notifications;
 [assembly: System.Reflection.AssemblyDescription("Проверка заблокированных площадок Яндекс Директа")]
 [assembly: System.Reflection.AssemblyCompany("Brandmaker")]
 [assembly: System.Reflection.AssemblyProduct("bm-blocked")]
-[assembly: System.Reflection.AssemblyVersion("1.1.3.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.3.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.4.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.4.0")]
 
 namespace BmBlocked
 {
+    internal static class TrustedSessionKeyStore
+    {
+        private const string FileName = "trusted-session-key.dat";
+        private static readonly byte[] Entropy = Encoding.UTF8.GetBytes(
+            "bm-blocked:trusted-session-key:v1");
+
+        internal static string GetDataDirectory()
+        {
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Brandmaker",
+                "bm-blocked");
+            Directory.CreateDirectory(directory);
+            return directory;
+        }
+
+        internal static string LoadOrCreate(string appDirectory)
+        {
+            var filePath = Path.Combine(appDirectory, FileName);
+
+            try
+            {
+                if (File.Exists(filePath))
+                {
+                    var protectedKey = File.ReadAllBytes(filePath);
+                    var existingKey = ProtectedData.Unprotect(
+                        protectedKey,
+                        Entropy,
+                        DataProtectionScope.CurrentUser);
+
+                    if (existingKey.Length == 32)
+                    {
+                        return Convert.ToBase64String(existingKey);
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            var key = new byte[32];
+
+            using (var random = RandomNumberGenerator.Create())
+            {
+                random.GetBytes(key);
+            }
+
+            var encryptedKey = ProtectedData.Protect(
+                key,
+                Entropy,
+                DataProtectionScope.CurrentUser);
+            var temporaryPath = filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+
+            File.WriteAllBytes(temporaryPath, encryptedKey);
+
+            try
+            {
+                if (File.Exists(filePath))
+                {
+                    File.Delete(filePath);
+                }
+
+                File.Move(temporaryPath, filePath);
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(temporaryPath))
+                    {
+                        File.Delete(temporaryPath);
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return Convert.ToBase64String(key);
+        }
+    }
+
     internal static class Program
     {
         private const string SingleInstanceMutexName = @"Local\BmBlockedSingleInstance";
@@ -733,6 +815,9 @@ namespace BmBlocked
             return
                 String.Equals(normalizedPath, "auth-config.json", StringComparison.OrdinalIgnoreCase) ||
                 String.Equals(normalizedPath, "settings.json", StringComparison.OrdinalIgnoreCase) ||
+                String.Equals(normalizedPath, "operation-history.json", StringComparison.OrdinalIgnoreCase) ||
+                String.Equals(normalizedPath, "remembered-token.json", StringComparison.OrdinalIgnoreCase) ||
+                String.Equals(normalizedPath, "trusted-session-key.dat", StringComparison.OrdinalIgnoreCase) ||
                 String.Equals(normalizedPath, "last-operation.json", StringComparison.OrdinalIgnoreCase);
         }
 
@@ -858,6 +943,8 @@ namespace BmBlocked
         private const string Url = "http://127.0.0.1:8124/index.html";
         private readonly string notificationPipeName = Program.NotificationPipeName;
         private readonly string internalToken = Guid.NewGuid().ToString("N");
+        private readonly string trustedSessionDataDirectory;
+        private readonly string trustedSessionSecret;
         private readonly NotifyIcon trayIcon;
         private readonly ToolStripMenuItem checkUpdatesItem;
         private readonly ToolStripMenuItem installUpdateItem;
@@ -885,6 +972,9 @@ namespace BmBlocked
 
         internal TrayAppContext()
         {
+            trustedSessionDataDirectory = TrustedSessionKeyStore.GetDataDirectory();
+            trustedSessionSecret = TrustedSessionKeyStore.LoadOrCreate(
+                trustedSessionDataDirectory);
             dispatcher = new Control();
             dispatcher.CreateControl();
             Program.SetToastActionHandler(HandleUpdateAction);
@@ -1362,6 +1452,10 @@ namespace BmBlocked
                     notificationPipeName;
                 serverProcess.StartInfo.EnvironmentVariables["BM_BLOCKED_INTERNAL_TOKEN"] =
                     internalToken;
+                serverProcess.StartInfo.EnvironmentVariables["BM_BLOCKED_TRUSTED_SESSION_SECRET"] =
+                    trustedSessionSecret;
+                serverProcess.StartInfo.EnvironmentVariables["BM_BLOCKED_USER_DATA_DIR"] =
+                    trustedSessionDataDirectory;
                 serverProcess.OutputDataReceived += delegate(object sender, DataReceivedEventArgs args)
                 {
                     AppendServerLog(args.Data);

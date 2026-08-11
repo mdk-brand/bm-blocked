@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>bm-blocked</title>
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=1.1.3" />
-    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico?v=1.1.3" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=1.1.4" />
+    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico?v=1.1.4" />
     <meta name="theme-color" content="#f5f5f7" />
     <script>
       try {
@@ -289,8 +289,115 @@
         font-size: 13px;
       }
 
+      .update-status.success {
+        color: var(--success);
+      }
+
       .dialog-panel-wide {
         width: min(100%, 680px);
+      }
+
+      .history-panel {
+        width: min(100%, 920px);
+        max-height: min(680px, calc(100vh - 48px));
+      }
+
+      .history-details-overlay {
+        z-index: 110;
+      }
+
+      .history-table {
+        min-width: 760px;
+        table-layout: fixed;
+        font-size: 13px;
+      }
+
+      .history-table th,
+      .history-table td {
+        width: auto;
+        padding: 11px 12px;
+      }
+
+      .history-table th:nth-child(1),
+      .history-table td:nth-child(1) {
+        width: 132px;
+      }
+
+      .history-table th:nth-child(2),
+      .history-table td:nth-child(2) {
+        width: 190px;
+      }
+
+      .history-table th:nth-child(4),
+      .history-table td:nth-child(4) {
+        width: 90px;
+      }
+
+      .history-table th:nth-child(5),
+      .history-table td:nth-child(5) {
+        width: 176px;
+      }
+
+      .history-client,
+      .history-action-copy {
+        display: grid;
+        gap: 2px;
+      }
+
+      .history-client span,
+      .history-action-state {
+        color: var(--text-secondary);
+        font-size: 11px;
+      }
+
+      .history-reverse-button {
+        width: 100%;
+        min-height: 36px;
+        padding: 0 10px;
+        border-color: var(--line);
+        background: var(--surface);
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .history-empty {
+        margin: 0;
+        padding: var(--space-7) 0;
+        color: var(--text-secondary);
+        text-align: center;
+      }
+
+      .history-details-list {
+        display: grid;
+        gap: var(--space-5);
+      }
+
+      .history-campaign + .history-campaign {
+        padding-top: var(--space-4);
+        border-top: 1px solid var(--line-soft);
+      }
+
+      .history-campaign h3 {
+        margin: 0 0 var(--space-2);
+        font-size: 14px;
+      }
+
+      .history-campaign-status {
+        color: var(--text-secondary);
+        font-weight: 400;
+      }
+
+      .history-placement-list {
+        display: grid;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .history-placement-list a {
+        color: var(--accent);
+        overflow-wrap: anywhere;
       }
 
       .dialog-body {
@@ -941,6 +1048,12 @@
           color: var(--text);
         }
 
+        .history-reverse-button:hover:not(:disabled) {
+          border-color: var(--neutral-hover-line);
+          background: var(--surface-subtle);
+          color: var(--text);
+        }
+
         .theme-toggle:hover:not(:disabled) {
           border-color: var(--neutral-hover-line);
           background: var(--surface-subtle);
@@ -993,6 +1106,10 @@
 
         .prefix-grid {
           grid-template-columns: 1fr;
+        }
+
+        .history-panel {
+          max-height: calc(100vh - 24px);
         }
 
         .check-progress {
@@ -1176,10 +1293,80 @@
       </div>
     </section>
 
+    <section
+      id="historyDialog"
+      class="update-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="historyHeading"
+      hidden
+    >
+      <div class="update-panel history-panel">
+        <div class="update-heading">
+          <h2 id="historyHeading">История операций</h2>
+          <p id="historyOwner"></p>
+        </div>
+        <div class="dialog-body">
+          <div id="historyTableWrap" class="table-wrap" hidden>
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th>Время</th>
+                  <th>Клиент</th>
+                  <th>Действие</th>
+                  <th>Площадки</th>
+                  <th>Обратное действие</th>
+                </tr>
+              </thead>
+              <tbody id="historyBody"></tbody>
+            </table>
+          </div>
+          <p id="historyEmpty" class="history-empty">История операций пуста.</p>
+        </div>
+        <p id="historyStatus" class="update-status" aria-live="polite"></p>
+        <div class="update-actions">
+          <button id="historyClose" class="update-later" type="button">Закрыть</button>
+        </div>
+      </div>
+    </section>
+
+    <section
+      id="historyDetailsDialog"
+      class="update-overlay history-details-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="historyDetailsHeading"
+      hidden
+    >
+      <div class="update-panel dialog-panel-wide">
+        <div class="update-heading">
+          <h2 id="historyDetailsHeading">Площадки операции</h2>
+          <p id="historyDetailsSummary"></p>
+        </div>
+        <div id="historyDetailsBody" class="dialog-body history-details-list"></div>
+        <div class="update-actions">
+          <button id="historyDetailsClose" class="update-later" type="button">Закрыть</button>
+        </div>
+      </div>
+    </section>
+
     <header id="appHeader" class="app-header" hidden>
       <div class="app-header-inner">
         <h1>bm-blocked</h1>
         <div class="header-session">
+          <button
+            id="historyButton"
+            class="theme-toggle"
+            type="button"
+            aria-label="История операций"
+            title="История операций"
+            disabled
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+              <path d="M3 3v5h5M12 7v5l3 2" />
+            </svg>
+          </button>
           <button
             id="settingsButton"
             class="theme-toggle settings-button"
@@ -1335,6 +1522,18 @@
       const workspace = document.querySelector("#workspace");
       const sessionUser = document.querySelector("#sessionUser");
       const logoutButton = document.querySelector("#logoutButton");
+      const historyButton = document.querySelector("#historyButton");
+      const historyDialog = document.querySelector("#historyDialog");
+      const historyOwner = document.querySelector("#historyOwner");
+      const historyTableWrap = document.querySelector("#historyTableWrap");
+      const historyBody = document.querySelector("#historyBody");
+      const historyEmpty = document.querySelector("#historyEmpty");
+      const historyStatus = document.querySelector("#historyStatus");
+      const historyCloseButton = document.querySelector("#historyClose");
+      const historyDetailsDialog = document.querySelector("#historyDetailsDialog");
+      const historyDetailsSummary = document.querySelector("#historyDetailsSummary");
+      const historyDetailsBody = document.querySelector("#historyDetailsBody");
+      const historyDetailsCloseButton = document.querySelector("#historyDetailsClose");
       const settingsButton = document.querySelector("#settingsButton");
       const settingsDialog = document.querySelector("#settingsDialog");
       const settingsForm = document.querySelector("#settingsForm");
@@ -1394,7 +1593,10 @@
       let hasActualityCheck = false;
       let hasChannelCheck = false;
       let activePlacementJobId = "";
-      let undoState = { available: false };
+      let authenticatedUsername = "Сотрудник";
+      let tokenAccountLoaded = false;
+      let historyOperations = [];
+      let latestUndoOperation = null;
       let channelSettings = {
         costThreshold: 15,
         periodDays: 30,
@@ -1614,10 +1816,11 @@
       }
 
       function showWorkspace(username) {
+        authenticatedUsername = username || "Сотрудник";
         authGate.hidden = true;
         appHeader.hidden = false;
         workspace.hidden = false;
-        sessionUser.textContent = username;
+        sessionUser.textContent = authenticatedUsername;
         authPasswordInput.value = "";
         authStatusText.textContent = "";
         setAuthBusy(false);
@@ -1634,6 +1837,8 @@
         sessionUser.textContent = "";
         tokenInput.value = "";
         closeSettingsDialog();
+        closeHistoryDetailsDialog();
+        closeHistoryDialog();
         renderClients([]);
         resetReport();
         authStatusText.textContent = message;
@@ -1642,6 +1847,23 @@
 
         if (configured) {
           authPasswordInput.focus();
+        }
+      }
+
+      async function restoreRememberedToken() {
+        try {
+          const payload = await getJson("/api/remembered-token");
+          const token = String(payload.token || "").trim();
+
+          if (!token) {
+            return false;
+          }
+
+          tokenInput.value = token;
+          return loadClientsForToken(token, { restored: true });
+        } catch (error) {
+          setStatus(`Не удалось восстановить OAuth-токен: ${error.message}`, "error");
+          return false;
         }
       }
 
@@ -1662,6 +1884,7 @@
 
           if (payload.authenticated) {
             showWorkspace(payload.username);
+            await restoreRememberedToken();
             return;
           }
 
@@ -1764,6 +1987,337 @@
         settingsCancelButton.disabled = false;
       }
 
+      function setHistoryStatus(message = "", type = "") {
+        historyStatus.textContent = message;
+        historyStatus.classList.toggle("success", type === "success");
+      }
+
+      function closeHistoryDetailsDialog() {
+        historyDetailsDialog.hidden = true;
+        historyDetailsBody.innerHTML = "";
+      }
+
+      function closeHistoryDialog() {
+        closeHistoryDetailsDialog();
+        historyDialog.hidden = true;
+        setHistoryStatus();
+        historyButton.disabled = !tokenAccountLoaded;
+      }
+
+      function formatHistoryTime(value) {
+        const date = new Date(value);
+
+        if (Number.isNaN(date.getTime())) {
+          return "—";
+        }
+
+        return new Intl.DateTimeFormat("ru-RU", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(date);
+      }
+
+      function getHistoryActionLabel(operation) {
+        return operation.action === "block-channels"
+          ? "Заблокированы каналы"
+          : "Площадки удалены из запрещенных";
+      }
+
+      function showHistoryDetails(operation) {
+        historyDetailsSummary.textContent = `${getHistoryActionLabel(operation)} · ${formatHistoryTime(operation.createdAt)}`;
+        historyDetailsBody.innerHTML = "";
+
+        for (const campaign of operation.campaigns || []) {
+          const section = document.createElement("section");
+          const heading = document.createElement("h3");
+          const state = document.createElement("span");
+          const list = document.createElement("ul");
+
+          section.className = "history-campaign";
+          heading.textContent = campaign.campaignName;
+          state.className = "history-campaign-status";
+          state.textContent = campaign.reverted ? " · действие отменено" : "";
+          heading.append(state);
+          list.className = "history-placement-list";
+
+          for (const placement of campaign.placements || []) {
+            const item = document.createElement("li");
+            const link = document.createElement("a");
+
+            link.href = getPlacementHref({ placement });
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = placement;
+            item.append(link);
+            list.append(item);
+          }
+
+          section.append(heading, list);
+          historyDetailsBody.append(section);
+        }
+
+        historyDetailsDialog.hidden = false;
+        historyDetailsCloseButton.focus();
+      }
+
+      function getQuickUndoLabel(operation) {
+        if (operation?.action === "clear") {
+          return "↶ Отменить очистку";
+        }
+
+        if (operation?.action === "block-channels") {
+          return "↶ Отменить блокировку каналов";
+        }
+
+        return "↶ Отменить последнее действие";
+      }
+
+      function setLatestUndoOperation(operation = null) {
+        latestUndoOperation = operation?.revertable ? operation : null;
+        const isAvailable = Boolean(
+          latestUndoOperation && currentCampaigns.length > 0,
+        );
+
+        undoActionButton.hidden = !isAvailable;
+        undoActionButton.disabled = !isAvailable;
+        undoActionButton.textContent = getQuickUndoLabel(latestUndoOperation);
+        undoActionButton.title = isAvailable
+          ? "Отменить последнюю операцию выбранного клиента"
+          : "";
+      }
+
+      function syncLatestUndoFromHistory(operations = historyOperations) {
+        const client = getSelectedClient();
+        const operation = client
+          ? operations.find(
+              (item) => item.revertable && item.clientLogin === client.login,
+            )
+          : null;
+
+        setLatestUndoOperation(operation);
+      }
+
+      async function refreshLatestUndoOperation() {
+        const token = tokenInput.value.trim();
+
+        if (!token || !tokenAccountLoaded) {
+          setLatestUndoOperation();
+          return;
+        }
+
+        try {
+          const payload = await postJson("/api/operation-history", {
+            token,
+          });
+
+          if (token !== tokenInput.value.trim() || !tokenAccountLoaded) {
+            return;
+          }
+
+          historyOperations = Array.isArray(payload.operations)
+            ? payload.operations
+            : [];
+
+          if (payload.ownerLogin) {
+            sessionUser.textContent = payload.ownerLogin;
+          }
+
+          syncLatestUndoFromHistory();
+        } catch (error) {
+          setLatestUndoOperation();
+        }
+      }
+
+      function renderOperationHistory(operations) {
+        historyOperations = Array.isArray(operations) ? operations : [];
+        historyBody.innerHTML = "";
+        historyTableWrap.hidden = historyOperations.length === 0;
+        historyEmpty.hidden = historyOperations.length > 0;
+        historyEmpty.textContent = "История операций пуста.";
+
+        for (const operation of historyOperations) {
+          const row = document.createElement("tr");
+          const timeCell = document.createElement("td");
+          const clientCell = document.createElement("td");
+          const clientCopy = document.createElement("div");
+          const clientName = document.createElement("strong");
+          const clientLogin = document.createElement("span");
+          const actionCell = document.createElement("td");
+          const actionCopy = document.createElement("div");
+          const actionName = document.createElement("span");
+          const actionState = document.createElement("span");
+          const countCell = document.createElement("td");
+          const count = document.createElement("span");
+          const helpButton = document.createElement("button");
+          const reverseCell = document.createElement("td");
+          const reverseButton = document.createElement("button");
+          const revertedCampaigns = (operation.campaigns || []).filter(
+            (campaign) => campaign.reverted,
+          ).length;
+
+          timeCell.textContent = formatHistoryTime(operation.createdAt);
+          clientCopy.className = "history-client";
+          clientName.textContent = operation.clientName || operation.clientLogin;
+          clientLogin.textContent = operation.clientLogin;
+          clientCopy.append(clientName);
+
+          if (operation.clientLogin !== operation.clientName) {
+            clientCopy.append(clientLogin);
+          }
+
+          clientCell.append(clientCopy);
+          actionCopy.className = "history-action-copy";
+          actionName.textContent = getHistoryActionLabel(operation);
+          actionState.className = "history-action-state";
+
+          if (!operation.revertable) {
+            actionState.textContent = "Действие отменено";
+          } else if (revertedCampaigns > 0) {
+            actionState.textContent = `Частично отменено: ${revertedCampaigns} из ${operation.campaignCount}`;
+          }
+
+          actionCopy.append(actionName);
+
+          if (actionState.textContent) {
+            actionCopy.append(actionState);
+          }
+
+          actionCell.append(actionCopy);
+          count.textContent = String(operation.placementCount || 0);
+          helpButton.type = "button";
+          helpButton.className = "help-button";
+          helpButton.textContent = "?";
+          helpButton.setAttribute("aria-label", "Показать площадки операции");
+          helpButton.addEventListener("click", () => showHistoryDetails(operation));
+          countCell.append(count, helpButton);
+
+          reverseButton.type = "button";
+          reverseButton.className = "history-reverse-button";
+          reverseButton.disabled = !operation.revertable;
+          reverseButton.textContent = !operation.revertable
+            ? "Отменено"
+            : operation.action === "block-channels"
+            ? "Вернуть к показам"
+            : "Вернуть в запрещенные";
+          reverseButton.addEventListener("click", () =>
+            reverseHistoryEntry(operation, reverseButton),
+          );
+          reverseCell.append(reverseButton);
+          row.append(timeCell, clientCell, actionCell, countCell, reverseCell);
+          historyBody.append(row);
+        }
+
+        syncLatestUndoFromHistory(historyOperations);
+      }
+
+      async function loadOperationHistory() {
+        const token = tokenInput.value.trim();
+
+        if (!token || !tokenAccountLoaded) {
+          throw new Error("Сначала загрузите клиентов по OAuth-токену.");
+        }
+
+        const payload = await postJson("/api/operation-history", { token });
+        const ownerLogin = payload.ownerLogin || "";
+
+        if (ownerLogin) {
+          sessionUser.textContent = ownerLogin;
+        }
+
+        historyOwner.textContent = ownerLogin
+          ? `Аккаунт Яндекса: ${ownerLogin}`
+          : "История аккаунта текущего OAuth-токена";
+        renderOperationHistory(payload.operations || []);
+        return payload;
+      }
+
+      async function openHistoryDialog() {
+        if (!tokenInput.value.trim() || !tokenAccountLoaded) {
+          setStatus("Сначала загрузите клиентов по OAuth-токену.", "error");
+          return;
+        }
+
+        historyDialog.hidden = false;
+        historyTableWrap.hidden = true;
+        historyEmpty.hidden = false;
+        historyEmpty.textContent = "Загружаю историю...";
+        setHistoryStatus();
+        historyButton.disabled = true;
+
+        try {
+          await loadOperationHistory();
+        } catch (error) {
+          historyEmpty.textContent = "Не удалось загрузить историю.";
+          setHistoryStatus(error.message);
+        } finally {
+          historyButton.disabled = false;
+          historyCloseButton.focus();
+        }
+      }
+
+      async function refreshCurrentReportAfterHistoryChange(operation) {
+        const client = getSelectedClient();
+
+        if (!client || client.login !== operation.clientLogin || currentCampaigns.length === 0) {
+          return;
+        }
+
+        const payload = await postJson("/api/blocked-placements", {
+          token: tokenInput.value.trim(),
+          clientLogin: client.login,
+        });
+        checkedCampaignIds.clear();
+        hasActualityCheck = false;
+        hasChannelCheck = false;
+        renderReport(payload);
+      }
+
+      async function reverseHistoryEntry(operation, button) {
+        const reverseDescription = operation.action === "block-channels"
+          ? "удалить эти каналы из запрещенных и вернуть их к показам"
+          : "вернуть эти площадки в список запрещенных";
+
+        if (!window.confirm(`Выполнить обратное действие: ${reverseDescription}?`)) {
+          return;
+        }
+
+        button.disabled = true;
+        button.textContent = "Выполняю...";
+        setHistoryStatus("Выполняю обратное действие...");
+
+        try {
+          const payload = await postJson("/api/operation-history/reverse", {
+            token: tokenInput.value.trim(),
+            operationId: operation.operationId,
+          });
+          let reportWarning = "";
+
+          try {
+            await refreshCurrentReportAfterHistoryChange(operation);
+          } catch (error) {
+            reportWarning = " Таблицу не удалось обновить автоматически.";
+          }
+
+          await loadOperationHistory();
+          const failedCount = (payload.failedCampaigns || []).length;
+          const message = failedCount > 0
+            ? `Обратное действие выполнено для кампаний: ${payload.totalRevertedCampaigns || 0}. Ошибок: ${failedCount}.${reportWarning}`
+            : `Обратное действие выполнено. Обновлено кампаний: ${payload.totalRevertedCampaigns || 0}.${reportWarning}`;
+
+          setHistoryStatus(message, failedCount > 0 ? "" : "success");
+          setStatus(message, failedCount > 0 ? "error" : "success");
+        } catch (error) {
+          setHistoryStatus(error.message);
+          button.disabled = false;
+          button.textContent = operation.action === "block-channels"
+            ? "Вернуть к показам"
+            : "Вернуть в запрещенные";
+        }
+      }
+
       function invalidateChannelChecks() {
         currentCampaigns = currentCampaigns.map((campaign) => {
           const { channels, channelCount, ...remainingCampaign } = campaign;
@@ -1780,7 +2334,6 @@
               0,
             ),
             skippedAppSites: Number(skippedAppsCount.textContent) || 0,
-            undo: undoState,
           }, { withActualityCheck: hasActualityCheck });
         }
       }
@@ -1865,27 +2418,13 @@
         cancelCheckButton.textContent = "Остановить";
       }
 
-      function applyUndoState(nextUndoState) {
-        undoState = nextUndoState?.available
-          ? { ...nextUndoState, available: true }
-          : { available: false };
-        undoActionButton.hidden = !undoState.available;
-        undoActionButton.disabled = !undoState.available;
-        undoActionButton.textContent = undoState.action === "clear"
-          ? "↶ Отменить очистку"
-          : "↶ Отменить блокировку каналов";
-        undoActionButton.title = undoState.action === "clear"
-          ? "Отменить последнюю очистку"
-          : "Отменить последнюю блокировку каналов";
-      }
-
       function resetReport() {
         currentCampaigns = [];
         hasActualityCheck = false;
         hasChannelCheck = false;
         checkedCampaignIds.clear();
+        setLatestUndoOperation();
         resetCheckProgress();
-        applyUndoState({ available: false });
         selectAllCampaigns.checked = false;
         selectAllCampaigns.indeterminate = false;
         postTableActions.hidden = true;
@@ -1910,10 +2449,13 @@
 
       function renderClients(nextClients) {
         clients = nextClients;
+        tokenAccountLoaded = false;
+        historyButton.disabled = true;
         clientSelect.value = "";
         clientOptions.innerHTML = "";
 
         if (clients.length === 0) {
+          sessionUser.textContent = authenticatedUsername;
           tokenField.hidden = false;
           clientField.hidden = true;
           loadReportButton.hidden = true;
@@ -1968,9 +2510,6 @@
 
       function renderReport(payload, options = {}) {
         currentCampaigns = payload.campaigns || [];
-        if (payload.undo) {
-          applyUndoState(payload.undo);
-        }
         hasActualityCheck = hasActualityCheck || Boolean(options.withActualityCheck);
         hasChannelCheck = hasChannelCheck || Boolean(options.withChannelCheck);
         reportBody.innerHTML = "";
@@ -2483,29 +3022,49 @@
         return payload;
       }
 
-      loadClientsButton.addEventListener("click", async () => {
-        const token = tokenInput.value.trim();
-
+      async function loadClientsForToken(token, options = {}) {
         if (!token) {
           setStatus("Введите OAuth-токен.", "error");
           tokenInput.focus();
-          return;
+          return false;
         }
 
         resetReport();
         renderClients([]);
-        setStatus("Загружаю клиентов...");
+        setStatus(
+          options.restored
+            ? "Восстанавливаю сохраненный OAuth-токен..."
+            : "Загружаю клиентов...",
+        );
         setBusy(loadClientsButton, true, "Загрузка...");
 
         try {
           const payload = await postJson("/api/direct-clients", { token });
           renderClients(payload.clients || []);
-          setStatus(`Загружено клиентов: ${(payload.clients || []).length}.`, "success");
+          tokenAccountLoaded = true;
+          historyButton.disabled = false;
+
+          if (payload.owner?.login) {
+            sessionUser.textContent = payload.owner.login;
+          }
+
+          setStatus(
+            options.restored
+              ? `Сессия восстановлена. Загружено клиентов: ${(payload.clients || []).length}.`
+              : `Загружено клиентов: ${(payload.clients || []).length}.`,
+            "success",
+          );
+          return true;
         } catch (error) {
           setStatus(error.message, "error");
+          return false;
         } finally {
           setBusy(loadClientsButton, false, "Загрузить клиентов");
         }
+      }
+
+      loadClientsButton.addEventListener("click", async () => {
+        await loadClientsForToken(tokenInput.value.trim());
       });
 
       loadReportButton.addEventListener("click", async () => {
@@ -2535,6 +3094,7 @@
           });
           checkedCampaignIds.clear();
           renderReport(payload);
+          void refreshLatestUndoOperation();
           setStatus("Отчет сформирован.", "success");
         } catch (error) {
           setStatus(error.message, "error");
@@ -2604,7 +3164,6 @@
               0,
             ),
             skippedAppSites: payload.skippedAppSites || 0,
-            undo: undoState,
           }, { withActualityCheck: true });
           const completedCampaigns = (payload.campaigns || []).filter(
             campaignHasActualityCheck,
@@ -2704,7 +3263,6 @@
               0,
             ),
             skippedAppSites: Number(skippedAppsCount.textContent) || 0,
-            undo: undoState,
           }, { withChannelCheck: true });
           setStatus(
             `Проверка каналов завершена. Найдено площадок с расходом больше ${formatChannelCost(payload.costThreshold)} ₽ без НДС за ${payload.periodDays} дней: ${payload.totalChannels || 0}.`,
@@ -2782,6 +3340,7 @@
           const payload = await postJson("/api/clear-placements", {
             token,
             clientLogin: client.login,
+            clientName: client.name,
             campaigns: campaignsToClear,
           });
           const updatedById = new Map(
@@ -2818,7 +3377,6 @@
               0,
             ),
             skippedAppSites: Number(skippedAppsCount.textContent) || 0,
-            undo: payload.undo,
           }, { withActualityCheck: true });
 
           const failedCount = (payload.failedCampaigns || []).length;
@@ -2828,6 +3386,7 @@
               : `Удалено нерабочих площадок: ${payload.totalRemoved || 0}.`,
             failedCount > 0 ? "error" : "success",
           );
+          void refreshLatestUndoOperation();
         } catch (error) {
           setStatus(error.message, "error");
         } finally {
@@ -2895,6 +3454,7 @@
           const payload = await postJson("/api/block-channels", {
             token,
             clientLogin: client.login,
+            clientName: client.name,
             campaigns: campaignsToBlock,
           });
           const updatedById = new Map(
@@ -2956,7 +3516,6 @@
               0,
             ),
             skippedAppSites: Number(skippedAppsCount.textContent) || 0,
-            undo: payload.undo,
           }, { withChannelCheck: true });
 
           const failedCount = (payload.failedCampaigns || []).length;
@@ -2977,6 +3536,7 @@
             statusParts.join(" "),
             failedCount > 0 ? "error" : "success",
           );
+          void refreshLatestUndoOperation();
         } catch (error) {
           setStatus(error.message, "error");
         } finally {
@@ -2992,32 +3552,24 @@
         }
       });
 
-      channelPreviewCancelButton.addEventListener("click", () => {
-        closeChannelPreview(false);
-      });
-
-      channelPreviewConfirmButton.addEventListener("click", () => {
-        closeChannelPreview(true);
-      });
-
       undoActionButton.addEventListener("click", async () => {
-        const token = tokenInput.value.trim();
-        const client = getSelectedClient();
+        const operation = latestUndoOperation;
 
-        if (!token || !client || !undoState.available) {
+        if (!operation?.revertable) {
+          setLatestUndoOperation();
           return;
         }
 
-        const actionName = undoState.action === "clear"
-          ? "очистку"
-          : "блокировку каналов";
+        const confirmation = operation.action === "block-channels"
+          ? "Отменить последнюю блокировку каналов и вернуть их к показам?"
+          : "Отменить последнюю очистку и вернуть площадки в список запрещенных?";
 
-        if (!window.confirm(`Отменить последнюю ${actionName} и восстановить прежние списки площадок?`)) {
+        if (!window.confirm(confirmation)) {
           return;
         }
 
-        setStatus("Восстанавливаю прежние списки запрещенных площадок...");
-        setBusy(undoActionButton, true, "Восстановление...");
+        setStatus("Отменяю последнее действие...");
+        setBusy(undoActionButton, true, "Отмена...");
         checkReportButton.disabled = true;
         checkChannelsButton.disabled = true;
         clearReportButton.disabled = true;
@@ -3025,36 +3577,43 @@
         loadReportButton.disabled = true;
 
         try {
-          const undoPayload = await postJson("/api/undo", {
-            token,
-            clientLogin: client.login,
+          const payload = await postJson("/api/operation-history/reverse", {
+            token: tokenInput.value.trim(),
+            operationId: operation.operationId,
           });
-          const reportPayload = await postJson("/api/blocked-placements", {
-            token,
-            clientLogin: client.login,
-          });
-          checkedCampaignIds.clear();
-          hasActualityCheck = false;
-          hasChannelCheck = false;
-          renderReport(reportPayload);
+          let reportWarning = "";
 
-          const failedCount = (undoPayload.failedCampaigns || []).length;
-          setStatus(
-            failedCount > 0
-              ? `Восстановлено кампаний: ${undoPayload.totalRestoredCampaigns || 0}. Не удалось восстановить: ${failedCount}.`
-              : `Последнее действие отменено. Восстановлено кампаний: ${undoPayload.totalRestoredCampaigns || 0}.`,
-            failedCount > 0 ? "error" : "success",
-          );
+          try {
+            await refreshCurrentReportAfterHistoryChange(operation);
+          } catch (error) {
+            reportWarning = " Таблицу не удалось обновить автоматически.";
+          }
+
+          await refreshLatestUndoOperation();
+          const failedCount = (payload.failedCampaigns || []).length;
+          const message = failedCount > 0
+            ? `Последнее действие отменено для кампаний: ${payload.totalRevertedCampaigns || 0}. Ошибок: ${failedCount}.${reportWarning}`
+            : `Последнее действие отменено. Обновлено кампаний: ${payload.totalRevertedCampaigns || 0}.${reportWarning}`;
+
+          setStatus(message, failedCount > 0 ? "error" : "success");
         } catch (error) {
           setStatus(error.message, "error");
+          setLatestUndoOperation(operation);
         } finally {
-          setBusy(undoActionButton, false, "↶ Отменить последнее действие");
-          applyUndoState(undoState);
           updateCheckButtonState();
           updateChannelButtonsState();
           updateClearButtonState();
           loadReportButton.disabled = false;
+          setLatestUndoOperation(latestUndoOperation);
         }
+      });
+
+      channelPreviewCancelButton.addEventListener("click", () => {
+        closeChannelPreview(false);
+      });
+
+      channelPreviewConfirmButton.addEventListener("click", () => {
+        closeChannelPreview(true);
       });
 
       selectAllCampaigns.addEventListener("change", () => {
@@ -3086,12 +3645,37 @@
         loadReportButton.disabled = !hasSelectedClient;
       });
       tokenInput.addEventListener("input", () => {
+        closeHistoryDialog();
         renderClients([]);
         loadClientsButton.hidden = false;
         resetReport();
         setStatus("");
       });
 
+      historyButton.addEventListener("click", openHistoryDialog);
+      historyCloseButton.addEventListener("click", closeHistoryDialog);
+      historyDetailsCloseButton.addEventListener("click", closeHistoryDetailsDialog);
+      historyDialog.addEventListener("click", (event) => {
+        if (event.target === historyDialog) {
+          closeHistoryDialog();
+        }
+      });
+      historyDetailsDialog.addEventListener("click", (event) => {
+        if (event.target === historyDetailsDialog) {
+          closeHistoryDetailsDialog();
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") {
+          return;
+        }
+
+        if (!historyDetailsDialog.hidden) {
+          closeHistoryDetailsDialog();
+        } else if (!historyDialog.hidden) {
+          closeHistoryDialog();
+        }
+      });
       settingsButton.addEventListener("click", openSettingsDialog);
       settingsCancelButton.addEventListener("click", closeSettingsDialog);
       settingsForm.addEventListener("submit", async (event) => {
@@ -3173,6 +3757,7 @@
           }
 
           showWorkspace(payload.username);
+          await restoreRememberedToken();
         } catch (error) {
           authPasswordInput.value = "";
           authStatusText.textContent = error.message;

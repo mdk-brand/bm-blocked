@@ -19,6 +19,9 @@ $windowsData = Join-Path $winMetadata "Windows.Data.winmd"
 $windowsUi = Join-Path $winMetadata "Windows.UI.winmd"
 $compiler = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 $authConfig = Join-Path $root "auth-config.json"
+$legacyOperationHistory = Join-Path $dist "operation-history.json"
+$userDataDirectory = Join-Path $env:LOCALAPPDATA "Brandmaker\bm-blocked"
+$userOperationHistory = Join-Path $userDataDirectory "operation-history.json"
 $archive = Join-Path $root "bm-blocked.zip"
 $checksum = Join-Path $root "bm-blocked.zip.sha256"
 $systemNodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -60,6 +63,11 @@ if ($actualDist -ne $expectedDist -or [IO.Path]::GetDirectoryName($actualDist) -
   throw "Unexpected dist path: $actualDist"
 }
 
+if ((Test-Path $legacyOperationHistory) -and -not (Test-Path $userOperationHistory)) {
+  New-Item -ItemType Directory -Force -Path $userDataDirectory | Out-Null
+  Copy-Item -LiteralPath $legacyOperationHistory -Destination $userOperationHistory
+}
+
 if (Test-Path $dist) {
   Remove-Item -LiteralPath $dist -Recurse -Force
 }
@@ -80,6 +88,7 @@ $exePath = Join-Path $dist "bm-blocked.exe"
   /reference:System.Drawing.dll `
   /reference:System.IO.Compression.dll `
   /reference:System.IO.Compression.FileSystem.dll `
+  /reference:System.Security.dll `
   /reference:System.Web.Extensions.dll `
   /reference:System.Windows.Forms.dll `
   /reference:$systemRuntime `

@@ -1,17 +1,116 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 process.env.BM_BLOCKED_DISABLE_SERVER = "1";
+process.env.BM_BLOCKED_TRUSTED_SESSION_SECRET = Buffer.alloc(32, 7).toString("base64");
 
 const {
+  buildReversedBlockedSites,
   buildChannelReportDefinition,
+  createSessionToken,
+  decryptRememberedTokenPayload,
+  encryptRememberedTokenPayload,
   getLastDaysRange,
   getLast30DaysRange,
+  migrateOperationHistoryFile,
   normalizeChannelPlacement,
   normalizeChannelSettings,
   parseChannelPerformanceReport,
   selectChannelsForAvailableSlots,
 } = await import("./server.js");
+
+test("migrates legacy operation history once without overwriting new history", async (context) => {
+  const testDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), "bm-blocked-history-test-"),
+  );
+  const legacyPath = path.join(testDirectory, "legacy", "operation-history.json");
+  const currentPath = path.join(testDirectory, "current", "operation-history.json");
+  const legacyHistory = JSON.stringify({ schemaVersion: 1, operations: [{ operationId: "old" }] });
+  const currentHistory = JSON.stringify({ schemaVersion: 1, operations: [{ operationId: "new" }] });
+
+  context.after(() => fs.rm(testDirectory, { recursive: true, force: true }));
+  await fs.mkdir(path.dirname(legacyPath), { recursive: true });
+  await fs.writeFile(legacyPath, legacyHistory, "utf8");
+
+  assert.equal(await migrateOperationHistoryFile(legacyPath, currentPath), true);
+  assert.equal(await fs.readFile(currentPath, "utf8"), legacyHistory);
+
+  await fs.writeFile(currentPath, currentHistory, "utf8");
+  assert.equal(await migrateOperationHistoryFile(legacyPath, currentPath), false);
+  assert.equal(await fs.readFile(currentPath, "utf8"), currentHistory);
+});
+
+test("creates a session that expires exactly seven days after login", () => {
+  const now = Date.UTC(2026, 7, 11, 9, 0, 0);
+  const session = createSessionToken(now);
+  const encodedPayload = session.value.split(".")[0];
+  const payload = JSON.parse(
+    Buffer.from(encodedPayload, "base64url").toString("utf8"),
+  );
+
+  assert.equal(session.expiresAt, now + 7 * 24 * 60 * 60 * 1000);
+  assert.equal(payload.expiresAt, session.expiresAt);
+});
+
+test("encrypts a remembered OAuth token without storing it as plain text", () => {
+  const key = Buffer.alloc(32, 11);
+  const token = "yandex-oauth-secret-token";
+  const expiresAt = Date.UTC(2026, 7, 18, 9, 0, 0);
+  const encrypted = encryptRememberedTokenPayload(token, expiresAt, key);
+
+  assert.equal(JSON.stringify(encrypted).includes(token), false);
+  assert.deepEqual(decryptRememberedTokenPayload(encrypted, key), {
+    token,
+    expiresAt,
+  });
+});
+
+test("rejects a remembered token file with a changed expiration", () => {
+  const key = Buffer.alloc(32, 13);
+  const encrypted = encryptRememberedTokenPayload(
+    "another-secret-token",
+    Date.UTC(2026, 7, 18, 9, 0, 0),
+    key,
+  );
+
+  assert.throws(
+    () => decryptRememberedTokenPayload(
+      { ...encrypted, expiresAt: encrypted.expiresAt + 1000 },
+      key,
+    ),
+  );
+});
+
+test("reverses channel blocking without removing later exclusions", () => {
+  const result = buildReversedBlockedSites(
+    "block-channels",
+    ["example.ru", "t.me/blocked-by-service", "later-added.ru"],
+    ["t.me/blocked-by-service"],
+  );
+
+  assert.deepEqual(result, {
+    blockedSites: ["example.ru", "later-added.ru"],
+    changedCount: 1,
+    exceedsLimit: false,
+  });
+});
+
+test("reverses placement clearing without duplicating restored exclusions", () => {
+  const result = buildReversedBlockedSites(
+    "clear",
+    ["existing.ru", "already-restored.ru"],
+    ["removed.ru", "already-restored.ru"],
+  );
+
+  assert.deepEqual(result, {
+    blockedSites: ["existing.ru", "already-restored.ru", "removed.ru"],
+    changedCount: 1,
+    exceedsLimit: false,
+  });
+});
 
 test("puts custom report dates inside SelectionCriteria", () => {
   const definition = buildChannelReportDefinition(
