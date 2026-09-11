@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>bm-blocked</title>
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=1.1.4" />
-    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico?v=1.1.4" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=1.1.5" />
+    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico?v=1.1.5" />
     <meta name="theme-color" content="#f5f5f7" />
     <script>
       try {
@@ -997,6 +997,39 @@
         word-break: break-all;
       }
 
+      .channel-candidate-item {
+        display: flex;
+        width: fit-content;
+        max-width: 100%;
+        min-width: 0;
+        align-items: center;
+        gap: var(--space-2);
+      }
+
+      .channel-candidate-copy {
+        min-width: 0;
+        flex: 0 1 auto;
+        overflow-wrap: anywhere;
+      }
+
+      .placement-remove-button {
+        display: inline-grid;
+        width: 24px;
+        min-width: 24px;
+        height: 24px;
+        min-height: 24px;
+        flex: 0 0 24px;
+        place-items: center;
+        padding: 0;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: 18px;
+        font-weight: 400;
+        line-height: 1;
+      }
+
       .unavailable-meta {
         color: var(--text-secondary);
         font-size: 12px;
@@ -1062,6 +1095,12 @@
 
         .unavailable-list a:hover {
           color: var(--accent-hover);
+        }
+
+        .placement-remove-button:hover:not(:disabled) {
+          border-color: var(--danger-line);
+          background: var(--danger-soft);
+          color: var(--danger);
         }
       }
 
@@ -1230,13 +1269,17 @@
     >
       <form id="settingsForm" class="update-panel">
         <div class="update-heading">
-          <h2 id="settingsHeading">Настройки каналов</h2>
+          <h2 id="settingsHeading">Настройки площадок</h2>
           <p>Параметры применяются ко всем проверкам на этом компьютере.</p>
         </div>
         <div class="dialog-body settings-fields">
           <div class="field settings-number-field">
-            <label for="channelThreshold">Порог расхода, ₽ без НДС</label>
+            <label for="channelThreshold">Нижний порог, ₽ без НДС</label>
             <input id="channelThreshold" type="number" min="0" max="1000000" step="0.01" required />
+          </div>
+          <div class="field settings-number-field">
+            <label for="channelMaxThreshold">Верхний порог, ₽ без НДС</label>
+            <input id="channelMaxThreshold" type="number" min="0" max="1000000" step="0.01" required />
           </div>
           <div class="field settings-number-field">
             <label for="channelPeriod">Период, дней</label>
@@ -1244,7 +1287,7 @@
           </div>
           <div class="field settings-prefixes">
             <fieldset class="prefix-options">
-              <legend>Каналы для проверки</legend>
+              <legend>Площадки для проверки</legend>
               <div id="channelPrefixOptions" class="prefix-grid"></div>
             </fieldset>
           </div>
@@ -1267,7 +1310,7 @@
     >
       <div class="update-panel dialog-panel-wide">
         <div class="update-heading">
-          <h2 id="channelPreviewHeading">Блокировка каналов</h2>
+          <h2 id="channelPreviewHeading">Блокировка площадок</h2>
           <p id="channelPreviewSummary"></p>
         </div>
         <div class="dialog-body">
@@ -1479,7 +1522,7 @@
               <th>Рекламная кампания</th>
               <th>Количество заблокированных площадок</th>
               <th>Лимит</th>
-              <th>Каналы</th>
+              <th>Каналы / app</th>
               <th id="unavailableWebHeader" hidden>Нерабочие web</th>
             </tr>
           </thead>
@@ -1541,6 +1584,7 @@
       const settingsSaveButton = document.querySelector("#settingsSave");
       const settingsStatus = document.querySelector("#settingsStatus");
       const channelThresholdInput = document.querySelector("#channelThreshold");
+      const channelMaxThresholdInput = document.querySelector("#channelMaxThreshold");
       const channelPeriodInput = document.querySelector("#channelPeriod");
       const channelPrefixOptions = document.querySelector("#channelPrefixOptions");
       const tokenField = document.querySelector("#tokenField");
@@ -1599,8 +1643,10 @@
       let latestUndoOperation = null;
       let channelSettings = {
         costThreshold: 15,
+        maxCostThreshold: 1000000,
         periodDays: 30,
         prefixes: ["t.me/", "max.ru/", "web.max.ru/", "vk.com/", "rutube.ru/"],
+        includeApps: false,
       };
       let availableChannelPrefixes = [
         "t.me/",
@@ -1932,6 +1978,7 @@
           option.className = "prefix-option";
           checkbox.type = "checkbox";
           checkbox.value = prefix;
+          checkbox.dataset.prefix = "true";
           checkbox.checked = selectedPrefixes.has(prefix);
           copy.className = "prefix-option-copy";
           name.className = "prefix-option-name";
@@ -1941,6 +1988,24 @@
           option.append(checkbox, copy);
           channelPrefixOptions.append(option);
         }
+
+        const appOption = document.createElement("label");
+        const appCheckbox = document.createElement("input");
+        const appCopy = document.createElement("span");
+        const appName = document.createElement("span");
+        const appDescription = document.createElement("code");
+
+        appOption.className = "prefix-option";
+        appCheckbox.type = "checkbox";
+        appCheckbox.dataset.includeApps = "true";
+        appCheckbox.checked = channelSettings.includeApps === true;
+        appCopy.className = "prefix-option-copy";
+        appName.className = "prefix-option-name";
+        appName.textContent = "Приложения";
+        appDescription.textContent = "app-площадки";
+        appCopy.append(appName, appDescription);
+        appOption.append(appCheckbox, appCopy);
+        channelPrefixOptions.append(appOption);
       }
 
       function applyChannelSettings(nextSettings, nextAvailablePrefixes) {
@@ -1950,14 +2015,19 @@
 
         channelSettings = {
           costThreshold: Number(nextSettings.costThreshold) || 0,
+          maxCostThreshold: Number.isFinite(Number(nextSettings.maxCostThreshold))
+            ? Number(nextSettings.maxCostThreshold)
+            : 1000000,
           periodDays: Math.max(1, Number(nextSettings.periodDays) || 30),
           prefixes: Array.isArray(nextSettings.prefixes)
             ? nextSettings.prefixes.filter((prefix) =>
                 availableChannelPrefixes.includes(prefix),
               )
             : [],
+          includeApps: nextSettings.includeApps === true,
         };
         channelThresholdInput.value = String(channelSettings.costThreshold);
+        channelMaxThresholdInput.value = String(channelSettings.maxCostThreshold);
         channelPeriodInput.value = String(channelSettings.periodDays);
         renderChannelPrefixOptions();
       }
@@ -1972,6 +2042,7 @@
 
       function openSettingsDialog() {
         channelThresholdInput.value = String(channelSettings.costThreshold);
+        channelMaxThresholdInput.value = String(channelSettings.maxCostThreshold);
         channelPeriodInput.value = String(channelSettings.periodDays);
         renderChannelPrefixOptions();
         settingsStatus.textContent = "";
@@ -2022,7 +2093,7 @@
 
       function getHistoryActionLabel(operation) {
         return operation.action === "block-channels"
-          ? "Заблокированы каналы"
+          ? "Заблокированы площадки"
           : "Площадки удалены из запрещенных";
       }
 
@@ -2069,7 +2140,7 @@
         }
 
         if (operation?.action === "block-channels") {
-          return "↶ Отменить блокировку каналов";
+          return "↶ Отменить блокировку площадок";
         }
 
         return "↶ Отменить последнее действие";
@@ -2277,7 +2348,7 @@
 
       async function reverseHistoryEntry(operation, button) {
         const reverseDescription = operation.action === "block-channels"
-          ? "удалить эти каналы из запрещенных и вернуть их к показам"
+          ? "удалить эти площадки из запрещенных и вернуть их к показам"
           : "вернуть эти площадки в список запрещенных";
 
         if (!window.confirm(`Выполнить обратное действие: ${reverseDescription}?`)) {
@@ -2602,6 +2673,7 @@
         const channels = Array.isArray(campaign.channels) ? campaign.channels : [];
         const isChecked = Array.isArray(campaign.channels);
 
+        cell.className = "channel-cell";
         count.textContent = isChecked ? String(channels.length) : "—";
         cell.append(count);
 
@@ -2613,7 +2685,7 @@
           helpButton.textContent = "?";
           helpButton.setAttribute(
             "aria-label",
-            `Показать каналы кампании ${campaign.campaignName}`,
+            `Показать каналы и приложения кампании ${campaign.campaignName}`,
           );
           helpButton.addEventListener("click", () =>
             toggleChannelDetails(row, campaign),
@@ -2679,6 +2751,12 @@
         return Array.isArray(campaign.channels);
       }
 
+      function getChannelTargetLabel() {
+        return channelSettings.includeApps
+          ? "каналы и приложения"
+          : "каналы (tg, max и т.д.)";
+      }
+
       function updateChannelButtonsState() {
         const selectedCampaigns = currentCampaigns.filter((campaign) =>
           checkedCampaignIds.has(campaign.campaignId),
@@ -2698,10 +2776,13 @@
           : 0;
 
         checkChannelsButton.disabled = selectedCount === 0 || Boolean(activePlacementJobId);
+        const targetLabel = getChannelTargetLabel();
+
         checkChannelsButton.textContent = selectedCount > 0
-          ? `Проверить каналы (tg, max и т.д.) (${selectedCount})`
-          : "Проверить каналы (tg, max и т.д.)";
+          ? `Проверить ${targetLabel} (${selectedCount})`
+          : `Проверить ${targetLabel}`;
         blockChannelsButton.hidden = !hasChannelCheck;
+        blockChannelsButton.textContent = `Заблокировать ${targetLabel}`;
         blockChannelsButton.disabled =
           Boolean(activePlacementJobId) || !allSelectedChecked || channelsThatFit === 0;
 
@@ -2709,10 +2790,10 @@
           blockChannelsButton.title = "Выберите кампании.";
         } else if (!allSelectedChecked) {
           blockChannelsButton.title =
-            "Сначала проверьте каналы во всех выбранных кампаниях.";
+            "Сначала проверьте площадки во всех выбранных кампаниях.";
         } else if (channelsToBlock === 0) {
           blockChannelsButton.title =
-            "В выбранных кампаниях нет новых каналов для блокировки.";
+            "В выбранных кампаниях нет новых площадок для блокировки.";
         } else if (channelsThatFit === 0) {
           blockChannelsButton.title =
             "В выбранных кампаниях заполнен лимит запрещенных площадок.";
@@ -2769,7 +2850,7 @@
         channelPreviewSkipped.innerHTML = "";
         channelPreviewSummary.textContent = preview.totalSkipped > 0
           ? `Будет добавлено ${preview.totalSelected}. Не поместится из-за лимита: ${preview.totalSkipped}.`
-          : `Будет добавлено каналов: ${preview.totalSelected}.`;
+          : `Будет добавлено площадок: ${preview.totalSelected}.`;
 
         for (const campaign of preview.campaigns) {
           const row = document.createElement("tr");
@@ -2889,6 +2970,10 @@
         }).format(Number(cost) || 0);
       }
 
+      function formatChannelSpendRange(settings = channelSettings) {
+        return `больше ${formatChannelCost(settings.costThreshold)} ₽ и не больше ${formatChannelCost(settings.maxCostThreshold)} ₽ без НДС`;
+      }
+
       function toggleChannelDetails(row, campaign) {
         const nextRow = row.nextElementSibling;
         const detailsKey = `${campaign.campaignId}:channels`;
@@ -2914,23 +2999,63 @@
         detailsCell.colSpan = 5 + (hasActualityCheck ? 1 : 0);
         detailsCell.className = "unavailable-list-cell";
         counter.className = "unavailable-meta";
-        counter.textContent = `Каналов с расходом больше ${formatChannelCost(channelSettings.costThreshold)} ₽ без НДС: ${channels.length}.`;
+        counter.textContent = `Площадок с расходом ${formatChannelSpendRange()}: ${channels.length}.`;
         list.className = "unavailable-list";
 
         for (const channel of channels) {
           const item = document.createElement("li");
-          const link = document.createElement("a");
+          const copy = document.createElement("span");
+          const placementName = document.createElement(
+            channel.kind === "app" ? "span" : "a",
+          );
           const meta = document.createElement("span");
+          const removeButton = document.createElement("button");
 
-          link.href = channel.url;
-          link.target = "_blank";
-          link.rel = "noopener noreferrer";
-          link.textContent = channel.placement;
+          if (channel.kind !== "app") {
+            placementName.href = channel.url;
+            placementName.target = "_blank";
+            placementName.rel = "noopener noreferrer";
+          }
+          placementName.textContent = channel.placement;
           meta.className = "unavailable-meta";
-          meta.textContent = ` ${formatChannelCost(channel.cost)} ₽ без НДС${
+          meta.textContent = ` · ${formatChannelCost(channel.cost)} ₽ без НДС${
             channel.skippedByLimit ? " · не заблокирован: лимит 1000 площадок" : ""
           }`;
-          item.append(link, meta);
+          item.className = "channel-candidate-item";
+          copy.className = "channel-candidate-copy";
+          copy.append(placementName, meta);
+          removeButton.type = "button";
+          removeButton.className = "placement-remove-button";
+          removeButton.textContent = "×";
+          removeButton.title = "Не блокировать эту площадку";
+          removeButton.setAttribute(
+            "aria-label",
+            `Не блокировать площадку ${channel.placement}`,
+          );
+          removeButton.addEventListener("click", () => {
+            const channelKey = channel.key || channel.placement.toLowerCase();
+
+            campaign.channels = (campaign.channels || []).filter(
+              (candidate) =>
+                (candidate.key || candidate.placement.toLowerCase()) !== channelKey,
+            );
+            campaign.channelCount = campaign.channels.length;
+            item.remove();
+            counter.textContent = `Площадок с расходом ${formatChannelSpendRange()}: ${campaign.channels.length}.`;
+
+            const channelCell = row.querySelector(".channel-cell");
+
+            if (channelCell) {
+              channelCell.replaceWith(createChannelCell(row, campaign));
+            }
+
+            updateChannelButtonsState();
+
+            if (campaign.channels.length === 0) {
+              detailsRow.remove();
+            }
+          });
+          item.append(copy, removeButton);
           list.append(item);
         }
 
@@ -3227,14 +3352,14 @@
         }
 
         if (checkedCampaignIds.size === 0) {
-          setStatus("Выберите кампании для проверки каналов.", "error");
+          setStatus("Выберите кампании для проверки площадок.", "error");
           return;
         }
 
         const campaignIds = Array.from(checkedCampaignIds);
 
-        setStatus(`Проверяю расходы по каналам за последние ${channelSettings.periodDays} дней...`);
-        setBusy(checkChannelsButton, true, "Проверка каналов...");
+        setStatus(`Проверяю расходы по площадкам за последние ${channelSettings.periodDays} дней...`);
+        setBusy(checkChannelsButton, true, "Проверка площадок...");
         checkReportButton.disabled = true;
         clearReportButton.disabled = true;
         loadReportButton.disabled = true;
@@ -3247,8 +3372,10 @@
           });
           applyChannelSettings({
             costThreshold: payload.costThreshold,
+            maxCostThreshold: payload.maxCostThreshold,
             periodDays: payload.periodDays,
             prefixes: payload.prefixes,
+            includeApps: payload.includeApps,
           });
           const mergedCampaigns = mergeCheckedCampaigns(payload.campaigns || []);
           renderReport({
@@ -3264,8 +3391,11 @@
             ),
             skippedAppSites: Number(skippedAppsCount.textContent) || 0,
           }, { withChannelCheck: true });
+          const checkedTargetLabel = channelSettings.includeApps
+            ? "каналов и приложений"
+            : "каналов";
           setStatus(
-            `Проверка каналов завершена. Найдено площадок с расходом больше ${formatChannelCost(payload.costThreshold)} ₽ без НДС за ${payload.periodDays} дней: ${payload.totalChannels || 0}.`,
+            `Проверка ${checkedTargetLabel} завершена. Найдено площадок с расходом ${formatChannelSpendRange(payload)} за ${payload.periodDays} дней: ${payload.totalChannels || 0}.`,
             "success",
           );
           notifyCheckCompletion("success", {
@@ -3415,7 +3545,7 @@
           selectedCampaigns.some((campaign) => !campaignHasChannelCheck(campaign))
         ) {
           setStatus(
-            "Сначала проверьте каналы во всех выбранных кампаниях.",
+            "Сначала проверьте площадки во всех выбранных кампаниях.",
             "error",
           );
           updateChannelButtonsState();
@@ -3425,7 +3555,7 @@
         const preview = buildChannelBlockPreview(selectedCampaigns);
 
         if (preview.totalSelected === 0) {
-          setStatus("В выбранных кампаниях нет новых каналов для блокировки.", "error");
+          setStatus("В выбранных кампаниях нет новых площадок для блокировки.", "error");
           updateChannelButtonsState();
           return;
         }
@@ -3443,7 +3573,7 @@
           }))
           .filter((campaign) => campaign.channels.length > 0);
 
-        setStatus("Добавляю найденные каналы в запрещенные площадки...");
+        setStatus("Добавляю найденные площадки в запрещенные...");
         setBusy(blockChannelsButton, true, "Блокировка...");
         checkChannelsButton.disabled = true;
         checkReportButton.disabled = true;
@@ -3521,7 +3651,7 @@
           const failedCount = (payload.failedCampaigns || []).length;
           const skippedCount = payload.totalSkippedByLimit || 0;
           const statusParts = [
-            `Заблокировано каналов: ${payload.totalBlocked || 0}.`,
+            `Заблокировано площадок: ${payload.totalBlocked || 0}.`,
           ];
 
           if (skippedCount > 0) {
@@ -3561,7 +3691,7 @@
         }
 
         const confirmation = operation.action === "block-channels"
-          ? "Отменить последнюю блокировку каналов и вернуть их к показам?"
+          ? "Отменить последнюю блокировку площадок и вернуть их к показам?"
           : "Отменить последнюю очистку и вернуть площадки в список запрещенных?";
 
         if (!window.confirm(confirmation)) {
@@ -3688,10 +3818,14 @@
           const payload = await postJson("/api/settings", {
             channelSettings: {
               costThreshold: Number(channelThresholdInput.value),
+              maxCostThreshold: Number(channelMaxThresholdInput.value),
               periodDays: Number(channelPeriodInput.value),
               prefixes: Array.from(
-                channelPrefixOptions.querySelectorAll('input[type="checkbox"]:checked'),
+                channelPrefixOptions.querySelectorAll('input[data-prefix]:checked'),
                 (checkbox) => checkbox.value,
+              ),
+              includeApps: Boolean(
+                channelPrefixOptions.querySelector('input[data-include-apps]:checked'),
               ),
             },
           });
@@ -3702,7 +3836,7 @@
           invalidateChannelChecks();
           closeSettingsDialog();
           setStatus(
-            "Настройки каналов сохранены. Для актуальных данных повторите проверку каналов.",
+            "Настройки площадок сохранены. Для актуальных данных повторите проверку.",
             "success",
           );
         } catch (error) {

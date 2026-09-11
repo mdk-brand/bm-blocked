@@ -26,10 +26,11 @@ const siteCheckConcurrency = 8;
 const siteCheckTimeoutMs = 8000;
 const reportWaitTimeoutMs = 10 * 60 * 1000;
 const authConfigPath = path.join(root, "auth-config.json");
-const settingsPath = path.join(root, "settings.json");
 const userDataDirectory = process.env.BM_BLOCKED_USER_DATA_DIR
   ? path.resolve(process.env.BM_BLOCKED_USER_DATA_DIR)
   : root;
+const legacySettingsPath = path.join(root, "settings.json");
+const settingsPath = path.join(userDataDirectory, "settings.json");
 const legacyOperationHistoryPath = path.join(root, "operation-history.json");
 const operationHistoryPath = path.join(userDataDirectory, "operation-history.json");
 const rememberedTokenPath = path.join(userDataDirectory, "remembered-token.json");
@@ -45,8 +46,10 @@ const availableChannelPrefixes = Object.freeze([
 ]);
 const defaultChannelSettings = Object.freeze({
   costThreshold: 15,
+  maxCostThreshold: 1000000,
   periodDays: 30,
   prefixes: [...availableChannelPrefixes],
+  includeApps: false,
 });
 const authCookieName = "bm_blocked_session";
 const authSessionDurationSeconds = 7 * 24 * 60 * 60;
@@ -181,15 +184,36 @@ function normalizeChannelPrefix(value) {
 }
 
 function normalizeChannelSettings(value = {}) {
-  const costThreshold = Number(value.costThreshold);
-  const periodDays = Math.trunc(Number(value.periodDays));
-  const rawPrefixes = Array.isArray(value.prefixes) ? value.prefixes : [];
+  const costThreshold = Number(
+    value.costThreshold ?? defaultChannelSettings.costThreshold,
+  );
+  const maxCostThreshold = Number(
+    value.maxCostThreshold ?? defaultChannelSettings.maxCostThreshold,
+  );
+  const periodDays = Math.trunc(
+    Number(value.periodDays ?? defaultChannelSettings.periodDays),
+  );
+  const rawPrefixes = Array.isArray(value.prefixes)
+    ? value.prefixes
+    : defaultChannelSettings.prefixes;
   const prefixes = Array.from(
     new Set(rawPrefixes.map(normalizeChannelPrefix).filter(Boolean)),
   );
 
   if (!Number.isFinite(costThreshold) || costThreshold < 0 || costThreshold > 1000000) {
-    throw new InputError("Порог расхода должен быть числом от 0 до 1 000 000 рублей.");
+    throw new InputError("Нижний порог расхода должен быть числом от 0 до 1 000 000 рублей.");
+  }
+
+  if (
+    !Number.isFinite(maxCostThreshold) ||
+    maxCostThreshold < 0 ||
+    maxCostThreshold > 1000000
+  ) {
+    throw new InputError("Верхний порог расхода должен быть числом от 0 до 1 000 000 рублей.");
+  }
+
+  if (maxCostThreshold <= costThreshold) {
+    throw new InputError("Верхний порог расхода должен быть больше нижнего.");
   }
 
   if (!Number.isInteger(periodDays) || periodDays < 1 || periodDays > 365) {
@@ -208,12 +232,35 @@ function normalizeChannelSettings(value = {}) {
 
   return {
     costThreshold: Math.round(costThreshold * 100) / 100,
+    maxCostThreshold: Math.round(maxCostThreshold * 100) / 100,
     periodDays,
     prefixes,
+    includeApps: value.includeApps === true,
   };
 }
 
 async function loadChannelSettings() {
+  if (path.resolve(legacySettingsPath) !== path.resolve(settingsPath)) {
+    try {
+      await fs.access(settingsPath);
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+
+      try {
+        const legacySettings = normalizeChannelSettings(
+          JSON.parse(await fs.readFile(legacySettingsPath, "utf8")),
+        );
+        await persistChannelSettings(settingsPath, legacySettings);
+      } catch (migrationError) {
+        if (migrationError.code !== "ENOENT") {
+          console.warn(`Channel settings migration failed: ${migrationError.message}`);
+        }
+      }
+    }
+  }
+
   try {
     const rawSettings = await fs.readFile(settingsPath, "utf8");
     return normalizeChannelSettings(JSON.parse(rawSettings));
@@ -417,9 +464,18 @@ if (
   setTimeout(() => ensureOperationHistoryMigrated().catch(() => {}), 0).unref();
 }
 
-async function saveChannelSettings(nextSettings) {
+async function persistChannelSettings(filePath, nextSettings) {
   const normalizedSettings = normalizeChannelSettings(nextSettings);
-  await writeJsonAtomically(settingsPath, normalizedSettings);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await writeJsonAtomically(filePath, normalizedSettings);
+  return normalizedSettings;
+}
+
+async function saveChannelSettings(nextSettings) {
+  const normalizedSettings = await persistChannelSettings(
+    settingsPath,
+    nextSettings,
+  );
   channelSettings = normalizedSettings;
   return channelSettings;
 }
@@ -427,8 +483,10 @@ async function saveChannelSettings(nextSettings) {
 function toPublicChannelSettings(settings = channelSettings) {
   return {
     costThreshold: settings.costThreshold,
+    maxCostThreshold: settings.maxCostThreshold,
     periodDays: settings.periodDays,
     prefixes: [...settings.prefixes],
+    includeApps: settings.includeApps === true,
   };
 }
 
@@ -1151,6 +1209,49 @@ function normalizeChannelPlacement(
   }
 }
 
+function normalizeAppPlacement(value) {
+  const rawValue = normalizePlacementValue(value);
+
+  if (
+    !rawValue ||
+    /\s/.test(rawValue) ||
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(rawValue)
+  ) {
+    return null;
+  }
+
+  try {
+    const url = new URL(`https://${rawValue.replace(/^\/+/, "")}`);
+    const hostname = url.hostname.toLowerCase();
+
+    if (!looksLikeMobileAppHostname(hostname)) {
+      return null;
+    }
+
+    const pathname = url.pathname.replace(/\/+$/, "");
+    const placement = `${hostname}${pathname === "/" ? "" : pathname}`;
+
+    return {
+      key: placement.toLowerCase(),
+      placement,
+      url: "",
+      kind: "app",
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function normalizeTrackedPlacement(value, settings = defaultChannelSettings) {
+  const channel = normalizeChannelPlacement(value, settings.prefixes);
+
+  if (channel) {
+    return { ...channel, kind: "channel" };
+  }
+
+  return settings.includeApps === true ? normalizeAppPlacement(value) : null;
+}
+
 function parseChannelPerformanceReport(
   reportText,
   campaigns = [],
@@ -1168,7 +1269,7 @@ function parseChannelPerformanceReport(
 
     const [campaignIdValue, placementValue, costValue] = parseTsvRow(line);
     const campaignId = String(campaignIdValue || "").trim();
-    const channel = normalizeChannelPlacement(placementValue, settings.prefixes);
+    const channel = normalizeTrackedPlacement(placementValue, settings);
     const cost = Number(String(costValue || "").replace(/\s/g, "").replace(",", "."));
 
     if (!campaignIds.has(campaignId) || !channel || !Number.isFinite(cost)) {
@@ -1189,15 +1290,14 @@ function parseChannelPerformanceReport(
     campaigns.map((campaign) => {
       const blockedChannelKeys = new Set(
         campaign.blockedSites
-          .map((placement) =>
-            normalizeChannelPlacement(placement, settings.prefixes)?.key
-          )
+          .map((placement) => normalizeTrackedPlacement(placement, settings)?.key)
           .filter(Boolean),
       );
       const channels = Array.from(channelsByCampaign.get(campaign.campaignId).values())
         .filter(
           (channel) =>
             channel.cost > settings.costThreshold &&
+            channel.cost <= settings.maxCostThreshold &&
             !blockedChannelKeys.has(channel.key),
         )
         .map((channel) => ({
@@ -1249,7 +1349,7 @@ async function checkCampaignChannels(
   );
 
   if (campaignsToCheck.length === 0) {
-    throw new InputError("Не выбраны активные кампании РСЯ для проверки каналов.");
+    throw new InputError("Не выбраны активные кампании РСЯ для проверки площадок.");
   }
 
   const { dateFrom, dateTo } = getLastDaysRange(settings.periodDays);
@@ -1283,8 +1383,10 @@ async function checkCampaignChannels(
     dateFrom,
     dateTo,
     costThreshold: settings.costThreshold,
+    maxCostThreshold: settings.maxCostThreshold,
     periodDays: settings.periodDays,
     prefixes: [...settings.prefixes],
+    includeApps: settings.includeApps === true,
   };
 }
 
@@ -2563,13 +2665,18 @@ async function blockChannelPlacements(
     for (const requestedChannel of Array.isArray(selection?.channels)
       ? selection.channels
       : []) {
-      const channel = normalizeChannelPlacement(
+      const channel = normalizeTrackedPlacement(
         requestedChannel?.placement || requestedChannel,
-        settings.prefixes,
+        settings,
       );
       const cost = Number(requestedChannel?.cost);
 
-      if (!channel || !Number.isFinite(cost) || cost <= settings.costThreshold) {
+      if (
+        !channel ||
+        !Number.isFinite(cost) ||
+        cost <= settings.costThreshold ||
+        cost > settings.maxCostThreshold
+      ) {
         continue;
       }
 
@@ -2582,9 +2689,7 @@ async function blockChannelPlacements(
 
     const existingChannelKeys = new Set(
       campaign.blockedSites
-        .map((placement) =>
-          normalizeChannelPlacement(placement, settings.prefixes)?.key
-        )
+        .map((placement) => normalizeTrackedPlacement(placement, settings)?.key)
         .filter(Boolean),
     );
     const requestedChannels = Array.from(requestedChannelsByKey.values()).filter(
@@ -2802,7 +2907,7 @@ async function handleDesktopNotificationApi(req, res) {
     if (payload.kind === "success") {
       const campaignCount = Math.max(0, Math.trunc(Number(payload.campaignCount) || 0));
       message = payload.checkType === "channels"
-        ? `Проверка каналов завершена. Проверено кампаний: ${campaignCount}.`
+        ? `Проверка площадок завершена. Проверено кампаний: ${campaignCount}.`
         : `Проверка завершена. Проверено кампаний: ${campaignCount}.`;
     } else if (payload.kind === "error") {
       const errorMessage = String(payload.error || "неизвестная ошибка")
@@ -2918,7 +3023,7 @@ async function handleBlockChannelsApi(req, res) {
     const selections = Array.isArray(payload.campaigns) ? payload.campaigns : [];
 
     if (selections.length === 0) {
-      throw new InputError("Не выбраны кампании с каналами для блокировки.");
+      throw new InputError("Не выбраны кампании с площадками для блокировки.");
     }
 
     const result = await blockChannelPlacements(
@@ -3207,8 +3312,11 @@ export {
   getLastDaysRange,
   getLast30DaysRange,
   migrateOperationHistoryFile,
+  normalizeAppPlacement,
   normalizeChannelPlacement,
   normalizeChannelSettings,
+  normalizeTrackedPlacement,
   parseChannelPerformanceReport,
+  persistChannelSettings,
   selectChannelsForAvailableSlots,
 };

@@ -16,9 +16,12 @@ const {
   getLastDaysRange,
   getLast30DaysRange,
   migrateOperationHistoryFile,
+  normalizeAppPlacement,
   normalizeChannelPlacement,
   normalizeChannelSettings,
+  normalizeTrackedPlacement,
   parseChannelPerformanceReport,
+  persistChannelSettings,
   selectChannelsForAvailableSlots,
 } = await import("./server.js");
 
@@ -213,12 +216,15 @@ test("builds a configurable inclusive report range", () => {
 test("uses a custom threshold and selected supported channel prefixes", () => {
   const settings = normalizeChannelSettings({
     costThreshold: 25.5,
+    maxCostThreshold: 80,
     periodDays: 14,
     prefixes: ["t.me/", "vk.com/"],
   });
   const campaigns = [{ campaignId: "101", blockedSites: [] }];
   const report = [
     "101\tt.me/working\t25.51",
+    "101\tvk.com/at-upper-threshold\t80.00",
+    "101\tvk.com/above-upper-threshold\t80.01",
     "101\tmax.ru/not-selected\t100.00",
     "101\tt.me/exact-threshold\t25.50",
   ].join("\n");
@@ -226,7 +232,64 @@ test("uses a custom threshold and selected supported channel prefixes", () => {
 
   assert.deepEqual(
     parsed.get("101").map((channel) => channel.placement),
-    ["t.me/working"],
+    ["vk.com/at-upper-threshold", "t.me/working"],
+  );
+});
+
+test("keeps existing lower threshold when new settings fields are absent", () => {
+  const settings = normalizeChannelSettings({
+    costThreshold: 5,
+    periodDays: 30,
+    prefixes: ["t.me/"],
+  });
+
+  assert.equal(settings.costThreshold, 5);
+  assert.equal(settings.maxCostThreshold, 1000000);
+  assert.equal(settings.includeApps, false);
+});
+
+test("persists the complete channel settings without resetting the lower threshold", async (context) => {
+  const testDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), "bm-blocked-settings-test-"),
+  );
+  const settingsPath = path.join(testDirectory, "settings.json");
+
+  context.after(() => fs.rm(testDirectory, {
+    recursive: true,
+    force: true,
+    maxRetries: 3,
+    retryDelay: 20,
+  }));
+  await persistChannelSettings(settingsPath, {
+    costThreshold: 5,
+    maxCostThreshold: 240,
+    periodDays: 21,
+    prefixes: ["t.me/", "max.ru/"],
+    includeApps: true,
+  });
+
+  const restored = normalizeChannelSettings(
+    JSON.parse(await fs.readFile(settingsPath, "utf8")),
+  );
+
+  assert.deepEqual(restored, {
+    costThreshold: 5,
+    maxCostThreshold: 240,
+    periodDays: 21,
+    prefixes: ["t.me/", "max.ru/"],
+    includeApps: true,
+  });
+});
+
+test("requires the upper threshold to be greater than the lower threshold", () => {
+  assert.throws(
+    () => normalizeChannelSettings({
+      costThreshold: 20,
+      maxCostThreshold: 20,
+      periodDays: 30,
+      prefixes: [],
+    }),
+    /больше нижнего/,
   );
 });
 
@@ -238,6 +301,66 @@ test("allows disabling every channel prefix", () => {
       prefixes: [],
     }).prefixes,
     [],
+  );
+});
+
+test("keeps app checks disabled for existing settings", () => {
+  assert.equal(
+    normalizeChannelSettings({
+      costThreshold: 15,
+      periodDays: 30,
+      prefixes: ["t.me/"],
+    }).includeApps,
+    false,
+  );
+});
+
+test("recognizes app placements only when app checks are enabled", () => {
+  const enabledSettings = normalizeChannelSettings({
+    costThreshold: 15,
+    periodDays: 30,
+    prefixes: [],
+    includeApps: true,
+  });
+  const disabledSettings = { ...enabledSettings, includeApps: false };
+
+  assert.equal(normalizeAppPlacement("com.example.game")?.kind, "app");
+  assert.equal(normalizeTrackedPlacement("dsp-network.example", enabledSettings)?.kind, "app");
+  assert.equal(
+    normalizeTrackedPlacement("arrows.maze.escape.out.puzzle.ru", enabledSettings)?.kind,
+    "app",
+  );
+  assert.equal(normalizeTrackedPlacement("com.example.game", disabledSettings), null);
+  assert.equal(normalizeTrackedPlacement("ordinary-site.ru", enabledSettings), null);
+});
+
+test("includes costly unblocked apps in the channel report when enabled", () => {
+  const settings = normalizeChannelSettings({
+    costThreshold: 15,
+    periodDays: 30,
+    prefixes: ["t.me/"],
+    includeApps: true,
+  });
+  const campaigns = [{
+    campaignId: "101",
+    blockedSites: ["com.example.blocked"],
+  }];
+  const report = [
+    "101\tcom.example.game\t20.00",
+    "101\tcom.example.game\t2.50",
+    "101\tcom.example.blocked\t100.00",
+    "101\tdsp-network.example\t15.00",
+    "101\tt.me/channel\t16.00",
+    "101\tordinary-site.ru\t500.00",
+  ].join("\n");
+  const parsed = parseChannelPerformanceReport(report, campaigns, settings);
+
+  assert.deepEqual(
+    parsed.get("101").map(({ placement, cost, kind }) => ({ placement, cost, kind })),
+    [
+      { placement: "com.example.game", cost: 22.5, kind: "app" },
+      { placement: "t.me/channel", cost: 16, kind: "channel" },
+    ],
   );
 });
 

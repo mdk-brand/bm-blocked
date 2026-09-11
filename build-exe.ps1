@@ -20,8 +20,11 @@ $windowsUi = Join-Path $winMetadata "Windows.UI.winmd"
 $compiler = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 $authConfig = Join-Path $root "auth-config.json"
 $legacyOperationHistory = Join-Path $dist "operation-history.json"
+$legacySettings = Join-Path $dist "settings.json"
+$developmentSettings = Join-Path $root "settings.json"
 $userDataDirectory = Join-Path $env:LOCALAPPDATA "Brandmaker\bm-blocked"
 $userOperationHistory = Join-Path $userDataDirectory "operation-history.json"
+$userSettings = Join-Path $userDataDirectory "settings.json"
 $archive = Join-Path $root "bm-blocked.zip"
 $checksum = Join-Path $root "bm-blocked.zip.sha256"
 $systemNodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -66,6 +69,17 @@ if ($actualDist -ne $expectedDist -or [IO.Path]::GetDirectoryName($actualDist) -
 if ((Test-Path $legacyOperationHistory) -and -not (Test-Path $userOperationHistory)) {
   New-Item -ItemType Directory -Force -Path $userDataDirectory | Out-Null
   Copy-Item -LiteralPath $legacyOperationHistory -Destination $userOperationHistory
+}
+
+if (-not (Test-Path $userSettings)) {
+  $settingsToMigrate = @($legacySettings, $developmentSettings) |
+    Where-Object { Test-Path -LiteralPath $_ } |
+    Select-Object -First 1
+
+  if ($settingsToMigrate) {
+    New-Item -ItemType Directory -Force -Path $userDataDirectory | Out-Null
+    Copy-Item -LiteralPath $settingsToMigrate -Destination $userSettings
+  }
 }
 
 if (Test-Path $dist) {
