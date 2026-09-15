@@ -50,6 +50,7 @@ const defaultChannelSettings = Object.freeze({
   periodDays: 30,
   prefixes: [...availableChannelPrefixes],
   includeApps: false,
+  protectedPlacements: [],
 });
 const authCookieName = "bm_blocked_session";
 const authSessionDurationSeconds = 7 * 24 * 60 * 60;
@@ -80,6 +81,7 @@ const rememberedTokenEncryptionKey = trustedSessionSecret
   : null;
 const authConfig = await loadAuthConfig();
 let channelSettings = await loadChannelSettings();
+let settingsMutationQueue = Promise.resolve();
 const checkedWebsiteZones = new Set([
   "ru",
   "info",
@@ -230,12 +232,31 @@ function normalizeChannelSettings(value = {}) {
     throw new InputError("Можно выбирать только поддерживаемые префиксы каналов.");
   }
 
+  const rawProtectedPlacements = value.protectedPlacements ?? [];
+
+  if (!Array.isArray(rawProtectedPlacements)) {
+    throw new InputError("Список исключений должен быть массивом площадок.");
+  }
+
+  const protectedPlacements = Array.from(
+    new Map(rawProtectedPlacements.map((placement) => {
+      const normalized = normalizeProtectedPlacement(placement);
+
+      if (!normalized) {
+        throw new InputError("Список исключений содержит некорректную площадку.");
+      }
+
+      return [normalized.key, normalized.placement];
+    })).values(),
+  );
+
   return {
     costThreshold: Math.round(costThreshold * 100) / 100,
     maxCostThreshold: Math.round(maxCostThreshold * 100) / 100,
     periodDays,
     prefixes,
     includeApps: value.includeApps === true,
+    protectedPlacements,
   };
 }
 
@@ -471,13 +492,52 @@ async function persistChannelSettings(filePath, nextSettings) {
   return normalizedSettings;
 }
 
-async function saveChannelSettings(nextSettings) {
-  const normalizedSettings = await persistChannelSettings(
-    settingsPath,
-    nextSettings,
-  );
-  channelSettings = normalizedSettings;
-  return channelSettings;
+function mutateChannelSettings(transform) {
+  const mutation = settingsMutationQueue.then(async () => {
+    const normalizedSettings = await persistChannelSettings(
+      settingsPath,
+      transform(channelSettings),
+    );
+    channelSettings = normalizedSettings;
+    return toPublicChannelSettings();
+  });
+  settingsMutationQueue = mutation.catch(() => {});
+  return mutation;
+}
+
+function saveChannelSettings(nextSettings) {
+  return mutateChannelSettings((current) => ({
+    ...nextSettings,
+    protectedPlacements: current.protectedPlacements,
+  }));
+}
+
+function addProtectedPlacement(value) {
+  const normalized = normalizeProtectedPlacement(value);
+
+  if (!normalized) {
+    throw new InputError("Можно исключать только поддерживаемые каналы и app-площадки.");
+  }
+
+  return mutateChannelSettings((current) => ({
+    ...current,
+    protectedPlacements: [...current.protectedPlacements, normalized.placement],
+  }));
+}
+
+function removeProtectedPlacement(value) {
+  const normalized = normalizeProtectedPlacement(value);
+
+  if (!normalized) {
+    throw new InputError("Некорректная площадка для удаления из исключений.");
+  }
+
+  return mutateChannelSettings((current) => ({
+    ...current,
+    protectedPlacements: current.protectedPlacements.filter(
+      (placement) => normalizeProtectedPlacement(placement)?.key !== normalized.key,
+    ),
+  }));
 }
 
 function toPublicChannelSettings(settings = channelSettings) {
@@ -487,6 +547,7 @@ function toPublicChannelSettings(settings = channelSettings) {
     periodDays: settings.periodDays,
     prefixes: [...settings.prefixes],
     includeApps: settings.includeApps === true,
+    protectedPlacements: [...settings.protectedPlacements],
   };
 }
 
@@ -910,15 +971,11 @@ async function loadDirectClients(token) {
     const result = await directRequest(token, "agencyclients", {
       method: "get",
       params: {
-        SelectionCriteria: {},
-        FieldNames: ["ClientId", "Login", "ClientInfo"],
+        SelectionCriteria: { Archived: "NO" },
+        FieldNames: ["ClientId", "Login", "ClientInfo", "Archived"],
       },
     });
-    const clients = normalizeClients(result.Clients);
-
-    if (clients.length > 0) {
-      return clients;
-    }
+    return normalizeClients(result.Clients);
   } catch (error) {
     // Ordinary advertiser tokens do not have AgencyClients access.
   }
@@ -926,7 +983,7 @@ async function loadDirectClients(token) {
   const result = await directRequest(token, "clients", {
     method: "get",
     params: {
-      FieldNames: ["ClientId", "Login", "ClientInfo"],
+      FieldNames: ["ClientId", "Login", "ClientInfo", "Archived"],
     },
   });
 
@@ -935,6 +992,7 @@ async function loadDirectClients(token) {
 
 function normalizeClients(clients = []) {
   return clients
+    .filter((client) => client.Archived !== "YES")
     .map((client) => ({
       id: client.ClientId ? String(client.ClientId) : "",
       login: client.Login || "",
@@ -1242,6 +1300,42 @@ function normalizeAppPlacement(value) {
   }
 }
 
+function normalizeProtectedPlacement(value) {
+  const rawValue = normalizePlacementValue(value);
+
+  if (!rawValue || rawValue.length > 500) {
+    return null;
+  }
+
+  return normalizeChannelPlacement(rawValue, availableChannelPrefixes) ||
+    normalizeAppPlacement(rawValue);
+}
+
+function getProtectedPlacementKeys(placements) {
+  return new Set(
+    placements.map((placement) => normalizeProtectedPlacement(placement)?.key)
+      .filter(Boolean),
+  );
+}
+
+function filterProtectedChannels(report, protectedPlacements) {
+  const protectedKeys = getProtectedPlacementKeys(protectedPlacements);
+  const campaigns = report.campaigns.map((campaign) => {
+    const channels = campaign.channels.filter(
+      (channel) => !protectedKeys.has(channel.key),
+    );
+
+    return { ...campaign, channels, channelCount: channels.length };
+  });
+
+  return {
+    ...report,
+    campaigns,
+    totalChannels: campaigns.reduce((sum, campaign) => sum + campaign.channelCount, 0),
+    protectedPlacements: [...protectedPlacements],
+  };
+}
+
 function normalizeTrackedPlacement(value, settings = defaultChannelSettings) {
   const channel = normalizeChannelPlacement(value, settings.prefixes);
 
@@ -1261,6 +1355,7 @@ function parseChannelPerformanceReport(
   const channelsByCampaign = new Map(
     campaigns.map((campaign) => [campaign.campaignId, new Map()]),
   );
+  const protectedKeys = getProtectedPlacementKeys(settings.protectedPlacements || []);
 
   for (const line of String(reportText || "").split(/\r?\n/)) {
     if (!line.trim()) {
@@ -1298,6 +1393,7 @@ function parseChannelPerformanceReport(
           (channel) =>
             channel.cost > settings.costThreshold &&
             channel.cost <= settings.maxCostThreshold &&
+            !protectedKeys.has(channel.key) &&
             !blockedChannelKeys.has(channel.key),
         )
         .map((channel) => ({
@@ -1387,6 +1483,7 @@ async function checkCampaignChannels(
     periodDays: settings.periodDays,
     prefixes: [...settings.prefixes],
     includeApps: settings.includeApps === true,
+    protectedPlacements: [...(settings.protectedPlacements || [])],
   };
 }
 
@@ -2661,6 +2758,10 @@ async function blockChannelPlacements(
     }
 
     const requestedChannelsByKey = new Map();
+    const protectedKeys = getProtectedPlacementKeys([
+      ...(settings.protectedPlacements || []),
+      ...channelSettings.protectedPlacements,
+    ]);
 
     for (const requestedChannel of Array.isArray(selection?.channels)
       ? selection.channels
@@ -2675,7 +2776,8 @@ async function blockChannelPlacements(
         !channel ||
         !Number.isFinite(cost) ||
         cost <= settings.costThreshold ||
-        cost > settings.maxCostThreshold
+        cost > settings.maxCostThreshold ||
+        protectedKeys.has(channel.key)
       ) {
         continue;
       }
@@ -2832,6 +2934,20 @@ async function handleSaveSettingsApi(req, res) {
   }
 }
 
+async function handleProtectedPlacementApi(req, res, action) {
+  try {
+    const payload = await readJson(req);
+    const placement = requireString(payload, "placement", "площадку");
+    const savedSettings = action === "add"
+      ? await addProtectedPlacement(placement)
+      : await removeProtectedPlacement(placement);
+
+    sendJson(res, 200, { channelSettings: savedSettings });
+  } catch (error) {
+    sendJson(res, error.statusCode || 500, { error: error.message });
+  }
+}
+
 async function handleCheckPlacementsApi(req, res) {
   try {
     const payload = await readJson(req);
@@ -2860,7 +2976,10 @@ async function handleCheckChannelsApi(req, res) {
       settingsSnapshot,
     );
 
-    sendJson(res, 200, report);
+    sendJson(res, 200, filterProtectedChannels(
+      report,
+      channelSettings.protectedPlacements,
+    ));
   } catch (error) {
     sendJson(res, error.statusCode || 502, { error: error.message });
   }
@@ -3186,6 +3305,16 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "POST" && requestUrl.pathname === "/api/settings/exclusions/add") {
+    handleProtectedPlacementApi(req, res, "add");
+    return;
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/api/settings/exclusions/remove") {
+    handleProtectedPlacementApi(req, res, "remove");
+    return;
+  }
+
   if (req.method === "POST" && requestUrl.pathname === "/api/check-placements") {
     handleCheckPlacementsApi(req, res);
     return;
@@ -3304,6 +3433,7 @@ if (
 }
 
 export {
+  addProtectedPlacement,
   buildReversedBlockedSites,
   buildChannelReportDefinition,
   createSessionToken,
@@ -3315,8 +3445,13 @@ export {
   normalizeAppPlacement,
   normalizeChannelPlacement,
   normalizeChannelSettings,
+  normalizeClients,
+  normalizeProtectedPlacement,
   normalizeTrackedPlacement,
+  filterProtectedChannels,
   parseChannelPerformanceReport,
   persistChannelSettings,
+  removeProtectedPlacement,
+  saveChannelSettings,
   selectChannelsForAvailableSlots,
 };

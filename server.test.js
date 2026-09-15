@@ -2,28 +2,61 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 
 process.env.BM_BLOCKED_DISABLE_SERVER = "1";
 process.env.BM_BLOCKED_TRUSTED_SESSION_SECRET = Buffer.alloc(32, 7).toString("base64");
+const settingsTestDirectory = await fs.mkdtemp(
+  path.join(os.tmpdir(), "bm-blocked-live-settings-test-"),
+);
+process.env.BM_BLOCKED_USER_DATA_DIR = settingsTestDirectory;
+await fs.writeFile(
+  path.join(settingsTestDirectory, "settings.json"),
+  JSON.stringify({ costThreshold: 15, periodDays: 30, prefixes: ["t.me/"] }),
+  "utf8",
+);
+after(() => fs.rm(settingsTestDirectory, {
+  recursive: true,
+  force: true,
+  maxRetries: 3,
+  retryDelay: 20,
+}));
 
 const {
+  addProtectedPlacement,
   buildReversedBlockedSites,
   buildChannelReportDefinition,
   createSessionToken,
   decryptRememberedTokenPayload,
   encryptRememberedTokenPayload,
+  filterProtectedChannels,
   getLastDaysRange,
   getLast30DaysRange,
   migrateOperationHistoryFile,
   normalizeAppPlacement,
   normalizeChannelPlacement,
   normalizeChannelSettings,
+  normalizeClients,
+  normalizeProtectedPlacement,
   normalizeTrackedPlacement,
   parseChannelPerformanceReport,
   persistChannelSettings,
+  removeProtectedPlacement,
+  saveChannelSettings,
   selectChannelsForAvailableSlots,
 } = await import("./server.js");
+
+test("keeps active clients and excludes archived clients", () => {
+  const clients = normalizeClients([
+    { ClientId: 1, Login: "active", ClientInfo: "Активный", Archived: "NO" },
+    { ClientId: 2, Login: "archived", ClientInfo: "Архивный", Archived: "YES" },
+  ]);
+
+  assert.deepEqual(clients, [
+    { id: "1", login: "active", name: "Активный (active)" },
+  ]);
+  assert.deepEqual(normalizeClients([{ Login: "archived", Archived: "YES" }]), []);
+});
 
 test("migrates legacy operation history once without overwriting new history", async (context) => {
   const testDirectory = await fs.mkdtemp(
@@ -266,6 +299,7 @@ test("persists the complete channel settings without resetting the lower thresho
     periodDays: 21,
     prefixes: ["t.me/", "max.ru/"],
     includeApps: true,
+    protectedPlacements: ["max.ru/join/Keep", "com.example.game"],
   });
 
   const restored = normalizeChannelSettings(
@@ -278,7 +312,121 @@ test("persists the complete channel settings without resetting the lower thresho
     periodDays: 21,
     prefixes: ["t.me/", "max.ru/"],
     includeApps: true,
+    protectedPlacements: ["max.ru/join/Keep", "com.example.game"],
   });
+});
+
+test("keeps legacy settings valid with an empty persistent exclusion list", () => {
+  const settings = normalizeChannelSettings({
+    costThreshold: 5,
+    periodDays: 30,
+    prefixes: ["t.me/"],
+  });
+
+  assert.equal(settings.costThreshold, 5);
+  assert.deepEqual(settings.protectedPlacements, []);
+});
+
+test("normalizes exact protected placements regardless of enabled checks", () => {
+  const settings = normalizeChannelSettings({
+    costThreshold: 15,
+    periodDays: 30,
+    prefixes: [],
+    includeApps: false,
+    protectedPlacements: [
+      "MAX.ru/join/Keep",
+      "max.ru/join/keep",
+      "com.example.game",
+    ],
+  });
+
+  assert.deepEqual(settings.protectedPlacements, [
+    "max.ru/join/keep",
+    "com.example.game",
+  ]);
+  assert.equal(normalizeProtectedPlacement("max.ru/join/Keep")?.key, "max.ru/join/keep");
+  assert.equal(normalizeProtectedPlacement("ordinary-site.ru"), null);
+});
+
+test("ignores protected candidates across every campaign but keeps nearby paths", () => {
+  const settings = normalizeChannelSettings({
+    costThreshold: 15,
+    periodDays: 30,
+    prefixes: ["max.ru/"],
+    includeApps: true,
+    protectedPlacements: ["max.ru/join/Keep", "com.example.game"],
+  });
+  const campaigns = [
+    { campaignId: "101", blockedSites: [] },
+    { campaignId: "202", blockedSites: [] },
+  ];
+  const report = [
+    "101\tmax.ru/join/Keep\t100.00",
+    "202\tmax.ru/join/keep\t120.00",
+    "101\tmax.ru/join/Other\t20.00",
+    "101\tcom.example.game\t50.00",
+    "202\tcom.example.other\t30.00",
+  ].join("\n");
+  const parsed = parseChannelPerformanceReport(report, campaigns, settings);
+
+  assert.deepEqual(parsed.get("101").map((channel) => channel.placement), [
+    "max.ru/join/Other",
+  ]);
+  assert.deepEqual(parsed.get("202").map((channel) => channel.placement), [
+    "com.example.other",
+  ]);
+});
+
+test("removes a newly protected placement from an already formed report", () => {
+  const report = {
+    campaigns: [
+      { campaignId: "101", channels: [
+        { key: "max.ru/join/keep", placement: "max.ru/join/Keep" },
+        { key: "max.ru/join/other", placement: "max.ru/join/Other" },
+      ], channelCount: 2 },
+      { campaignId: "202", channels: [
+        { key: "max.ru/join/keep", placement: "max.ru/join/Keep" },
+      ], channelCount: 1 },
+    ],
+    totalChannels: 3,
+  };
+  const filtered = filterProtectedChannels(report, ["max.ru/join/Keep"]);
+
+  assert.equal(filtered.totalChannels, 1);
+  assert.deepEqual(filtered.campaigns.map((campaign) => campaign.channelCount), [1, 0]);
+  assert.equal(report.totalChannels, 3);
+});
+
+test("serializes exclusion edits and preserves them when saving other settings", async () => {
+  const settingsPath = path.join(settingsTestDirectory, "settings.json");
+  const baseSettings = {
+    costThreshold: 5,
+    maxCostThreshold: 240,
+    periodDays: 21,
+    prefixes: ["max.ru/"],
+    includeApps: true,
+  };
+
+  await Promise.all([
+    addProtectedPlacement("max.ru/join/Keep"),
+    saveChannelSettings(baseSettings),
+    addProtectedPlacement("com.example.game"),
+  ]);
+  let saved = normalizeChannelSettings(
+    JSON.parse(await fs.readFile(settingsPath, "utf8")),
+  );
+
+  assert.equal(saved.costThreshold, 5);
+  assert.deepEqual(saved.protectedPlacements, [
+    "max.ru/join/Keep",
+    "com.example.game",
+  ]);
+
+  await removeProtectedPlacement("MAX.ru/join/keep");
+  saved = normalizeChannelSettings(
+    JSON.parse(await fs.readFile(settingsPath, "utf8")),
+  );
+  assert.deepEqual(saved.protectedPlacements, ["com.example.game"]);
 });
 
 test("requires the upper threshold to be greater than the lower threshold", () => {
