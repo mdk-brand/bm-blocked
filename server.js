@@ -79,9 +79,6 @@ const rememberedTokenEncryptionKey = trustedSessionSecret
       .update("bm-blocked:remembered-token:v1")
       .digest()
   : null;
-const authConfig = await loadAuthConfig();
-let channelSettings = await loadChannelSettings();
-let settingsMutationQueue = Promise.resolve();
 const checkedWebsiteZones = new Set([
   "ru",
   "info",
@@ -111,6 +108,10 @@ class InputError extends Error {
     this.statusCode = 400;
   }
 }
+
+const authConfig = await loadAuthConfig();
+let channelSettings = await loadChannelSettings();
+let settingsMutationQueue = Promise.resolve();
 
 async function loadAuthConfig() {
   try {
@@ -284,7 +285,16 @@ async function loadChannelSettings() {
 
   try {
     const rawSettings = await fs.readFile(settingsPath, "utf8");
-    return normalizeChannelSettings(JSON.parse(rawSettings));
+    const settings = normalizeChannelSettings(JSON.parse(rawSettings));
+
+    if (settings.prefixes.length > 0 && settings.prefixes.length < availableChannelPrefixes.length) {
+      return await persistChannelSettings(settingsPath, {
+        ...settings,
+        prefixes: [...availableChannelPrefixes],
+      });
+    }
+
+    return settings;
   } catch (error) {
     if (error.code !== "ENOENT") {
       console.warn(`Channel settings were reset: ${error.message}`);
@@ -3454,4 +3464,5 @@ export {
   removeProtectedPlacement,
   saveChannelSettings,
   selectChannelsForAvailableSlots,
+  toPublicChannelSettings,
 };

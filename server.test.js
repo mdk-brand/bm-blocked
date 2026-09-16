@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
+import { fileURLToPath } from "node:url";
 
 process.env.BM_BLOCKED_DISABLE_SERVER = "1";
 process.env.BM_BLOCKED_TRUSTED_SESSION_SECRET = Buffer.alloc(32, 7).toString("base64");
@@ -45,6 +47,42 @@ const {
   saveChannelSettings,
   selectChannelsForAvailableSlots,
 } = await import("./server.js");
+
+test("restores saved settings with app exclusions on a fresh start", async (context) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "bm-blocked-startup-settings-"));
+  const settingsPath = path.join(directory, "settings.json");
+  context.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await fs.writeFile(settingsPath, JSON.stringify({
+    costThreshold: 5,
+    maxCostThreshold: 500,
+    periodDays: 21,
+    prefixes: ["t.me/"],
+    includeApps: true,
+    protectedPlacements: ["com.example.game"],
+  }));
+
+  const child = spawnSync(process.execPath, [
+    "--input-type=module",
+    "-e",
+    "const { toPublicChannelSettings } = await import('./server.js'); process.stdout.write(JSON.stringify(toPublicChannelSettings()));",
+  ], {
+    cwd: path.dirname(fileURLToPath(import.meta.url)),
+    env: { ...process.env, BM_BLOCKED_USER_DATA_DIR: directory },
+    encoding: "utf8",
+    timeout: 15000,
+  });
+
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stderr, "");
+  const restored = JSON.parse(child.stdout);
+  assert.equal(restored.costThreshold, 5);
+  assert.equal(restored.maxCostThreshold, 500);
+  assert.equal(restored.periodDays, 21);
+  assert.equal(restored.includeApps, true);
+  assert.deepEqual(restored.protectedPlacements, ["com.example.game"]);
+  assert.deepEqual(restored.prefixes, ["t.me/", "max.ru/", "web.max.ru/", "vk.com/", "rutube.ru/"]);
+  assert.deepEqual(JSON.parse(await fs.readFile(settingsPath, "utf8")), restored);
+});
 
 test("keeps active clients and excludes archived clients", () => {
   const clients = normalizeClients([

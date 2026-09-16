@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>bm-blocked</title>
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=1.1.6" />
-    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico?v=1.1.6" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=1.1.7" />
+    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico?v=1.1.7" />
     <meta name="theme-color" content="#f5f5f7" />
     <script>
       try {
@@ -1721,13 +1721,6 @@
         "vk.com/",
         "rutube.ru/",
       ];
-      const channelPrefixNames = {
-        "t.me/": "Telegram",
-        "max.ru/": "MAX",
-        "web.max.ru/": "MAX Web",
-        "vk.com/": "VK",
-        "rutube.ru/": "Rutube",
-      };
       let channelPreviewResolver = null;
       let updatePollTimer = null;
       let displayedUpdateRevision = -1;
@@ -2030,48 +2023,24 @@
       }
 
       function renderChannelPrefixOptions() {
-        const selectedPrefixes = new Set(channelSettings.prefixes);
-
         channelPrefixOptions.innerHTML = "";
-
-        for (const prefix of availableChannelPrefixes) {
+        for (const [name, setting, checked] of [
+          ["Каналы", "includeChannels", channelSettings.prefixes.length > 0],
+          ["Приложения", "includeApps", channelSettings.includeApps === true],
+        ]) {
           const option = document.createElement("label");
           const checkbox = document.createElement("input");
           const copy = document.createElement("span");
-          const name = document.createElement("span");
-          const code = document.createElement("code");
 
           option.className = "prefix-option";
           checkbox.type = "checkbox";
-          checkbox.value = prefix;
-          checkbox.dataset.prefix = "true";
-          checkbox.checked = selectedPrefixes.has(prefix);
-          copy.className = "prefix-option-copy";
-          name.className = "prefix-option-name";
-          name.textContent = channelPrefixNames[prefix] || prefix;
-          code.textContent = prefix;
-          copy.append(name, code);
+          checkbox.dataset[setting] = "true";
+          checkbox.checked = checked;
+          copy.className = "prefix-option-name";
+          copy.textContent = name;
           option.append(checkbox, copy);
           channelPrefixOptions.append(option);
         }
-
-        const appOption = document.createElement("label");
-        const appCheckbox = document.createElement("input");
-        const appCopy = document.createElement("span");
-        const appName = document.createElement("span");
-        const appDescription = document.createElement("code");
-
-        appOption.className = "prefix-option";
-        appCheckbox.type = "checkbox";
-        appCheckbox.dataset.includeApps = "true";
-        appCheckbox.checked = channelSettings.includeApps === true;
-        appCopy.className = "prefix-option-copy";
-        appName.className = "prefix-option-name";
-        appName.textContent = "Приложения";
-        appDescription.textContent = "app-площадки";
-        appCopy.append(appName, appDescription);
-        appOption.append(appCheckbox, appCopy);
-        channelPrefixOptions.append(appOption);
       }
 
       function renderProtectedPlacements() {
@@ -4008,10 +3977,9 @@
               costThreshold: Number(channelThresholdInput.value),
               maxCostThreshold: Number(channelMaxThresholdInput.value),
               periodDays: Number(channelPeriodInput.value),
-              prefixes: Array.from(
-                channelPrefixOptions.querySelectorAll('input[data-prefix]:checked'),
-                (checkbox) => checkbox.value,
-              ),
+              prefixes: channelPrefixOptions.querySelector('input[data-include-channels]:checked')
+                ? [...availableChannelPrefixes]
+                : [],
               includeApps: Boolean(
                 channelPrefixOptions.querySelector('input[data-include-apps]:checked'),
               ),
